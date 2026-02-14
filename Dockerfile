@@ -76,16 +76,12 @@ RUN npm ci --omit=dev --silent 2>/dev/null || npm install --omit=dev --silent
 COPY backend/src/ ./src/
 
 # ─── Create runtime directories ──────────────────────────────────────────────
-RUN mkdir -p uploads outputs jobs \
-    && chown -R node:node /app
+RUN mkdir -p uploads outputs jobs
 
 # ─── Environment configuration ───────────────────────────────────────────────
 ENV NODE_ENV=production \
     PORT=3001 \
     PATH="/app/build/solver:$PATH"
-
-# ─── Switch to non-root user ─────────────────────────────────────────────────
-USER node
 
 EXPOSE 3001
 
