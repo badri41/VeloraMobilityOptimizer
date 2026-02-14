@@ -1,79 +1,97 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# Velora Mobility Optimizer - Docker Build for Render Deployment
-# Includes: Node.js backend + Python parser + C++ solver binary
+# Velora Mobility Optimizer - Render Deployment
+# Multi-stage build: C++ Solver + Python Parser + Node.js Backend
 # ══════════════════════════════════════════════════════════════════════════════
 
-FROM ubuntu:22.04
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 1: Build C++ Solver
+# ══════════════════════════════════════════════════════════════════════════════
+FROM ubuntu:22.04 AS solver-builder
 
-# Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ─── Install System Dependencies ─────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Build tools for C++ solver
     build-essential \
     cmake \
     g++ \
-    # Python for excel parser
-    python3 \
-    python3-pip \
-    # Node.js prerequisites
-    curl \
-    ca-certificates \
-    # Required C++ libraries
     nlohmann-json3-dev \
     libcurl4-openssl-dev \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# ─── Install Node.js 20 LTS ──────────────────────────────────────────────────
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
 
-# ─── Set Working Directory ───────────────────────────────────────────────────
-WORKDIR /app
-
-# ─── Copy Project Files ──────────────────────────────────────────────────────
-# Copy CMake files first (for better caching)
+# Copy solver source
 COPY CMakeLists.txt ./
 COPY solver/ ./solver/
 
-# ─── Build C++ Solver ────────────────────────────────────────────────────────
-RUN mkdir -p build && \
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build build -j$(nproc) && \
-    # Verify solver was built
-    test -f build/solver/velora_solver && \
-    chmod +x build/solver/velora_solver
+# Build solver binary
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build -j$(nproc) \
+    && chmod +x build/solver/velora_solver \
+    && ./build/solver/velora_solver --version 2>/dev/null || true
 
-# ─── Install Python Dependencies ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Stage 2: Production Runtime
+# ══════════════════════════════════════════════════════════════════════════════
+FROM ubuntu:22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Runtime libraries for solver
+    libcurl4 \
+    libstdc++6 \
+    # Python 3 for Excel parser
+    python3 \
+    python3-pip \
+    # Node.js
+    curl \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+WORKDIR /app
+
+# ─── Copy compiled solver from builder stage ─────────────────────────────────
+COPY --from=solver-builder /build/build/solver/velora_solver ./build/solver/
+RUN chmod +x ./build/solver/velora_solver
+
+# ─── Install Python dependencies ─────────────────────────────────────────────
 COPY backend/requirements.txt ./backend/
 RUN pip3 install --no-cache-dir -r backend/requirements.txt
 
-# ─── Copy Parser Scripts ─────────────────────────────────────────────────────
+# ─── Copy Python parser ──────────────────────────────────────────────────────
 COPY parser/ ./parser/
 
-# ─── Install Node.js Dependencies ────────────────────────────────────────────
+# ─── Install Node.js dependencies ────────────────────────────────────────────
 COPY backend/package*.json ./backend/
 WORKDIR /app/backend
-RUN npm ci --production --silent 2>/dev/null || npm install --production --silent
+RUN npm ci --omit=dev --silent 2>/dev/null || npm install --omit=dev --silent
 
-# ─── Copy Backend Source Code ────────────────────────────────────────────────
+# ─── Copy backend source ─────────────────────────────────────────────────────
 COPY backend/src/ ./src/
 
-# ─── Create Required Directories ─────────────────────────────────────────────
-RUN mkdir -p uploads outputs jobs
+# ─── Create runtime directories ──────────────────────────────────────────────
+RUN mkdir -p uploads outputs jobs \
+    && chown -R node:node /app
 
-# ─── Environment Variables ───────────────────────────────────────────────────
-ENV NODE_ENV=production
-ENV PORT=3001
+# ─── Environment configuration ───────────────────────────────────────────────
+ENV NODE_ENV=production \
+    PORT=3001 \
+    PATH="/app/build/solver:$PATH"
 
-# ─── Expose Port ─────────────────────────────────────────────────────────────
+# ─── Switch to non-root user ─────────────────────────────────────────────────
+USER node
+
 EXPOSE 3001
 
-# ─── Health Check ────────────────────────────────────────────────────────────
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# ─── Health check ────────────────────────────────────────────────────────────
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:3001/api/health || exit 1
 
-# ─── Start Backend Server ────────────────────────────────────────────────────
+# ─── Start server ────────────────────────────────────────────────────────────
 CMD ["node", "src/app.js"]

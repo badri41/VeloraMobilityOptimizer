@@ -1,24 +1,48 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# Render Blueprint - Infrastructure as Code for Velora Backend
+# Render Blueprint - Velora Mobility Optimizer Backend
 # https://render.com/docs/blueprint-spec
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# DEPLOYMENT:
+#   1. Connect this repo to Render
+#   2. Select "Backend_deplyment" branch
+#   3. Choose "Blueprint" deployment type
+#   4. Set environment variables in dashboard
+#
 # ══════════════════════════════════════════════════════════════════════════════
 
 services:
   - type: web
     name: velora-backend
     runtime: docker
-    plan: free  # Change to "starter" ($7/mo) for always-on
     
-    # Health check endpoint
+    # Dockerfile location (relative to repo root)
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    
+    # Build configuration
+    branch: Backend_deplyment
+    
+    # Plan: free (spins down after 15min idle) or starter ($7/mo always-on)
+    plan: free
+    
+    # Server configuration
+    region: oregon  # or singapore, frankfurt, ohio
+    
+    # Health monitoring
     healthCheckPath: /api/health
     
-    # Environment variables (set sensitive ones in Render dashboard)
+    # Auto-deploy on push
+    autoDeploy: true
+    
+    # Environment variables
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 3001
+      # Set these in Render Dashboard (Settings > Environment)
       - key: FRONTEND_URL
-        sync: false  # Set manually in dashboard: https://your-app.vercel.app
+        sync: false  # Your Vercel frontend URL
       - key: MAPS_API_KEY
-        sync: false  # Optional: Set in dashboard if you have Google Maps API key
+        sync: false  # Google Maps API key (optional)
