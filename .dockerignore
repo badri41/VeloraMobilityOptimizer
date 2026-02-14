@@ -1,0 +1,65 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Docker Ignore - Exclude unnecessary files from build context
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Git
+.git
+.gitignore
+
+# Build artifacts (will be rebuilt in container)
+build/
+*/build/
+*.o
+*.a
+
+# Node modules (will be installed in container)
+node_modules/
+*/node_modules/
+
+# Frontend (deployed separately to Vercel)
+frontend/
+
+# Environment files (set via Render dashboard)
+.env
+.env.*
+env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Test data and outputs
+data/
+backend/uploads/
+backend/outputs/
+backend/jobs/
+testing_benchmarking/
+Velora Kriti_2026 TCs/
+
+# Documentation
+*.md
+!README.md
+
+# Scripts not needed in container
+scripts/
+deploy/
+
+# GitHub Actions
+.github/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+tmp/
+temp/
+*.tmp

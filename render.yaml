@@ -1,0 +1,24 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Render Blueprint - Infrastructure as Code for Velora Backend
+# https://render.com/docs/blueprint-spec
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  - type: web
+    name: velora-backend
+    runtime: docker
+    plan: free  # Change to "starter" ($7/mo) for always-on
+    
+    # Health check endpoint
+    healthCheckPath: /api/health
+    
+    # Environment variables (set sensitive ones in Render dashboard)
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: FRONTEND_URL
+        sync: false  # Set manually in dashboard: https://your-app.vercel.app
+      - key: MAPS_API_KEY
+        sync: false  # Optional: Set in dashboard if you have Google Maps API key
