@@ -1,0 +1,23 @@
+# Velora Frontend - Render Static Site Deployment
+
+services:
+  - type: web
+    name: velora-frontend
+    runtime: static
+    branch: Frontend_Deployment
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+    envVars:
+      - key: VITE_API_BASE
+        value: https://veloramobilityoptimizer.onrender.com/api
