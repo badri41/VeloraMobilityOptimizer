@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build/cmake_install.cmake",
+		"/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build/solver/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

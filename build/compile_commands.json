@@ -1,0 +1,14 @@
+[
+{
+  "directory": "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build",
+  "command": "/usr/bin/clang++ -DUSE_CURL -I/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/solver/include -I/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build/solver -isystem /opt/homebrew/include -g -std=c++17 -arch arm64 -fPIE -o solver/CMakeFiles/velora_solver.dir/src/main.cpp.o -c /Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/solver/src/main.cpp",
+  "file": "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/solver/src/main.cpp",
+  "output": "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build/solver/CMakeFiles/velora_solver.dir/src/main.cpp.o"
+},
+{
+  "directory": "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build",
+  "command": "/usr/bin/clang++ -DUSE_CURL -I/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/solver/include -I/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build/solver -isystem /opt/homebrew/include -g -std=c++17 -arch arm64 -fPIE -o solver/CMakeFiles/velora_solver.dir/src/map_distance.cpp.o -c /Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/solver/src/map_distance.cpp",
+  "file": "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/solver/src/map_distance.cpp",
+  "output": "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build/solver/CMakeFiles/velora_solver.dir/src/map_distance.cpp.o"
+}
+]

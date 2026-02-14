@@ -1,0 +1,121 @@
+{
+	"configurations" : 
+	[
+		{
+			"abstractTargets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "CURL::libcurl::@f523546a396b221e20a4",
+					"jsonFile" : "target-CURL__libcurl-Debug-5e8ea139af869cd318ed.json",
+					"name" : "CURL::libcurl",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "Threads::Threads::@f523546a396b221e20a4",
+					"jsonFile" : "target-Threads__Threads-Debug-d409e8bd4c936d9279e8.json",
+					"name" : "Threads::Threads",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "nlohmann_json::@f523546a396b221e20a4",
+					"jsonFile" : "target-nlohmann_json-Debug-6b3c6e4b883d3042dd61.json",
+					"name" : "nlohmann_json",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "nlohmann_json::nlohmann_json::@f523546a396b221e20a4",
+					"jsonFile" : "target-nlohmann_json__nlohmann_json-Debug-cf175d1e11145a6aeac7.json",
+					"name" : "nlohmann_json::nlohmann_json",
+					"projectIndex" : 0
+				}
+			],
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"jsonFile" : "directory-.-Debug-9ad1a58d4644cf6543fa.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"projectIndex" : 0,
+					"source" : "."
+				},
+				{
+					"abstractTargetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3
+					],
+					"build" : "solver",
+					"jsonFile" : "directory-solver-Debug-e1f7af9328f8af398e76.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.20"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "solver",
+					"targetIndexes" : 
+					[
+						0
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"abstractTargetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3
+					],
+					"directoryIndexes" : 
+					[
+						0,
+						1
+					],
+					"name" : "VeloraMobilityOptimizer",
+					"targetIndexes" : 
+					[
+						0
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "velora_solver::@f523546a396b221e20a4",
+					"jsonFile" : "target-velora_solver-Debug-2a1263117a3a2bf08c66.json",
+					"name" : "velora_solver",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer/build",
+		"source" : "/Users/mac/Coding/Projects/Kriti/velora-mobility-optimizer"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	}
+}

@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Environment (has API keys — NEVER commit)
+.env
+
+# Temp files
+uploads/
+outputs/
+
+# Solver binary (too large for git, build from source)
+solver/velora_solver
+
+# OS junk
+.DS_Store
+Thumbs.db
