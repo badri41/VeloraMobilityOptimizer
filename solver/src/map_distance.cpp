@@ -310,28 +310,7 @@ double MapDistance::distance(double lat1, double lon1, double lat2, double lon2)
     // Pre-calculate Haversine * 1.4 (always available as fallback)
     double haversineRoad = haversine(lat1, lon1, lat2, lon2) * 1.4;
 
-    // CASE 1: Haversine-only mode - no API calls
-    if (!allowExternal_ || provider_ == MapProvider::HAVERSINE) {
-        return haversineRoad;
-    }
-
-    // CASE 2: API disabled due to repeated failures
-    if (globalDisableExternal.load()) {
-        return haversineRoad;
-    }
-
-    // CASE 3: No API key for providers that need one
-    if (apiKey_.empty() && provider_ != MapProvider::OSRM) {
-        static bool warned = false;
-        if (!warned) {
-            std::cerr << "[MapDistance] No API key. Using Haversine * 1.4.\n";
-            std::cerr << "[MapDistance] Get free key: https://openrouteservice.org/dev/#/signup\n";
-            warned = true;
-        }
-        return haversineRoad;
-    }
-
-    // CASE 4: Check cache first
+    // Check cache first (regardless of provider)
     if (cacheEnabled_) {
         std::string cacheKey = makeCacheKey(lat1, lon1, lat2, lon2);
         {
@@ -343,24 +322,54 @@ double MapDistance::distance(double lat1, double lon1, double lat2, double lon2)
         }
     }
 
-    // CASE 5: Call API with automatic timeout fallback
-    double result = haversineRoad;
-
-    switch (provider_) {
-        case MapProvider::OPENROUTESERVICE:
-            result = openRouteServiceDistance(lat1, lon1, lat2, lon2);
-            break;
-        case MapProvider::GOOGLE_MAPS:
-            result = googleMapsDistance(lat1, lon1, lat2, lon2);
-            break;
-        case MapProvider::OSRM:
-            result = osrmDistance(lat1, lon1, lat2, lon2);
-            break;
-        default:
-            result = haversineRoad;
-            break;
+    // If API has been disabled due to repeated failures, use Haversine
+    if (globalDisableExternal.load()) {
+        return haversineRoad;
     }
 
+    // ALWAYS try to get real road distance via API
+    // Priority: 1) Configured provider with API key, 2) OSRM (free, no key)
+    double result = haversineRoad;
+    bool apiAttempted = false;
+
+#ifdef USE_CURL
+    // Try configured provider first if API key is available
+    if (!apiKey_.empty() && provider_ != MapProvider::OSRM && provider_ != MapProvider::HAVERSINE) {
+        apiAttempted = true;
+        switch (provider_) {
+            case MapProvider::OPENROUTESERVICE:
+                result = openRouteServiceDistance(lat1, lon1, lat2, lon2);
+                break;
+            case MapProvider::GOOGLE_MAPS:
+                result = googleMapsDistance(lat1, lon1, lat2, lon2);
+                break;
+            default:
+                break;
+        }
+        
+        // If configured provider succeeded (result differs from fallback), use it
+        if (std::abs(result - haversineRoad) > 0.01) {
+            goto cache_and_return;
+        }
+    }
+
+    // Always try OSRM as fallback (free, no API key needed)
+    // This runs if: no API key, configured provider failed, or OSRM is configured
+    {
+        apiAttempted = true;
+        double osrmResult = osrmDistance(lat1, lon1, lat2, lon2);
+        
+        // If OSRM succeeded (result differs from simple fallback calculation)
+        if (std::abs(osrmResult - haversineRoad) > 0.01) {
+            result = osrmResult;
+            goto cache_and_return;
+        }
+    }
+
+    // Both APIs failed - result remains as haversineRoad
+#endif
+
+cache_and_return:
     // Cache the result (whether from API or fallback)
     if (cacheEnabled_) {
         std::string cacheKey = makeCacheKey(lat1, lon1, lat2, lon2);
@@ -371,11 +380,11 @@ double MapDistance::distance(double lat1, double lon1, double lat2, double lon2)
     // Check if we should disable API globally (too many failures)
     int totalCalls = apiCallCount.load();
     int successCalls = apiSuccessCount.load();
-    if (totalCalls > 10 && successCalls < totalCalls / 2) {
-        // Less than 50% success rate after 10+ calls - disable API
+    if (totalCalls > 20 && successCalls < totalCalls / 4) {
+        // Less than 25% success rate after 20+ calls - disable API
         globalDisableExternal.store(true);
         std::cerr << "[MapDistance] Low success rate (" << successCalls << "/" << totalCalls
-                  << "). Switching to Haversine * 1.4 permanently.\n";
+                  << "). Switching to Haversine * 1.4 for remaining calculations.\n";
     }
 
     return result;
