@@ -41,8 +41,8 @@ services:
         value: production
       - key: PORT
         value: 3001
-      # Set these in Render Dashboard (Settings > Environment)
       - key: FRONTEND_URL
-        sync: false  # Your Vercel frontend URL
+        value: https://velora-jext.onrender.com
+      # Set in Render Dashboard (Settings > Environment)
       - key: MAPS_API_KEY
         sync: false  # Google Maps API key (optional)
