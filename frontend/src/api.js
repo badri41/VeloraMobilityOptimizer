@@ -1,5 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001/api";
 
+console.log("[API] Using backend:", API_BASE);
+
 export async function submitOptimization(payload) {
   try {
     const res = await fetch(`${API_BASE}/optimize/json`, {
@@ -20,7 +22,7 @@ export async function submitOptimization(payload) {
       error.name === "TypeError"
     ) {
       throw new Error(
-        "Cannot connect to backend server. Make sure the backend is running on http://localhost:3001",
+        `Cannot connect to backend server at ${API_BASE}. Please try again later.`,
       );
     }
     throw error;
