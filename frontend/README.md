@@ -2,7 +2,12 @@
 
 This branch contains **only the frontend deployment files** for the Velora Mobility Optimizer.
 
-## 🏗️ Tech Stack
+## � Live URLs
+
+- **Frontend**: https://velora-jext.onrender.com
+- **Backend API**: https://veloramobilityoptimizer.onrender.com/api
+
+## �🏗️ Tech Stack
 
 - **React 18** - UI Library
 - **Vite** - Build tool
