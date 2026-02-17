@@ -327,7 +327,18 @@ double MapDistance::distance(double lat1, double lon1, double lat2, double lon2)
         return haversineRoad;
     }
 
-    // ALWAYS try to get real road distance via API
+    // If external maps are disabled OR provider is explicitly Haversine, skip all API calls
+    if (!allowExternal_ || provider_ == MapProvider::HAVERSINE) {
+        // Cache and return haversine result
+        if (cacheEnabled_) {
+            std::string cacheKey = makeCacheKey(lat1, lon1, lat2, lon2);
+            std::lock_guard<std::mutex> lock(cacheMutex_);
+            distanceCache_[cacheKey] = haversineRoad;
+        }
+        return haversineRoad;
+    }
+
+    // Try to get real road distance via API
     // Priority: 1) Configured provider with API key, 2) OSRM (free, no key)
     double result = haversineRoad;
     bool apiAttempted = false;

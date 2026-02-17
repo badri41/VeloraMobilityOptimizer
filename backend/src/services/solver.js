@@ -17,7 +17,7 @@ function getSolverPath() {
   return buildPath; // Default, will fail with clear error
 }
 
-const TIMEOUT_MS = 2 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 90 * 1000;  // 90s default — solver has its own internal time limit
 
 async function run(inputPath, outputPath) {
   const solverPath = getSolverPath();
@@ -28,11 +28,22 @@ async function run(inputPath, outputPath) {
     );
   }
 
-  console.log(`[Solver] Running: ${solverPath} "${inputPath}" "${outputPath}"`);
+  // Read config to determine appropriate process timeout
+  let processTimeout = DEFAULT_TIMEOUT_MS;
+  try {
+    const inputData = JSON.parse(fs.readFileSync(inputPath, "utf-8"));
+    const solverTimeLimitSec = inputData.config?.solver_time_limit_sec || 60;
+    // Give the process 30s extra buffer beyond the solver's own time limit
+    processTimeout = (solverTimeLimitSec + 30) * 1000;
+  } catch (e) {
+    // Fallback to default timeout
+  }
+
+  console.log(`[Solver] Running: ${solverPath} "${inputPath}" "${outputPath}" (timeout: ${processTimeout / 1000}s)`);
   const startTime = Date.now();
 
   const result = await runProcess(solverPath, [inputPath, outputPath], {
-    timeout: TIMEOUT_MS,
+    timeout: processTimeout,
     cwd: PROJECT_ROOT,
   });
 
