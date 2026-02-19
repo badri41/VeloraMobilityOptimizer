@@ -1,7 +1,9 @@
 #pragma once
 #include <string>
+#include <vector>
 #include <unordered_map>
 #include <mutex>
+#include <utility>
 
 // API Provider enum
 enum class MapProvider {
@@ -42,6 +44,15 @@ public:
     static int getTimeoutFallbackCount();
     static int getErrorFallbackCount();
 
+    // Compute NxN distance table for a set of locations using OSRM Table API
+    // Returns flat vector of size N*N (row-major), distances in km
+    // Falls back to Haversine * 1.4 if API fails
+    std::vector<double> computeDistanceTable(
+        const std::vector<std::pair<double,double>>& locations) const;
+
+    // Haversine (public for fallback use)
+    double haversine(double lat1, double lon1, double lat2, double lon2) const;
+
     // Get provider info
     bool isExternalEnabled() const { return allowExternal_; }
     MapProvider getProvider() const { return provider_; }
@@ -57,9 +68,6 @@ private:
     // Thread-safe cache for distances
     mutable std::unordered_map<std::string, double> distanceCache_;
     mutable std::mutex cacheMutex_;
-
-    // Haversine formula (air distance)
-    double haversine(double lat1, double lon1, double lat2, double lon2) const;
 
     // API-specific implementations
     double googleMapsDistance(double lat1, double lon1, double lat2, double lon2) const;

@@ -145,13 +145,87 @@ struct SolverContext {
 
 static MapDistance* gMapDist = nullptr;
 
+// ============== DISTANCE MATRIX (Pre-computed NxN) ==============
+
+class DistanceMatrix {
+public:
+    bool enabled{false};
+
+    // Collect unique locations, build index, compute matrix
+    void build(const vector<Vehicle>& vehicles, const vector<Request>& requests, MapDistance& mapDist) {
+        // Collect all unique locations
+        vector<pair<double,double>> coords;
+        auto addLoc = [&](double lat, double lon) {
+            for (size_t i = 0; i < coords.size(); ++i) {
+                if (abs(coords[i].first - lat) < 1e-6 && abs(coords[i].second - lon) < 1e-6)
+                    return;
+            }
+            coords.push_back({lat, lon});
+        };
+
+        for (const auto& v : vehicles) addLoc(v.startLoc.lat, v.startLoc.lon);
+        for (const auto& r : requests) {
+            addLoc(r.pickup.lat, r.pickup.lon);
+            addLoc(r.dropoff.lat, r.dropoff.lon);
+        }
+
+        N_ = coords.size();
+        coords_ = coords;
+        cout << "Distance matrix: " << N_ << " unique locations" << endl;
+
+        // Compute NxN matrix via Table API (single HTTP call)
+        matrix_ = mapDist.computeDistanceTable(coords);
+
+        // Build coordinate-to-index lookup
+        for (size_t i = 0; i < coords_.size(); ++i) {
+            string key = makeKey(coords_[i].first, coords_[i].second);
+            locIndex_[key] = i;
+        }
+
+        enabled = true;
+    }
+
+    // Lookup distance from matrix
+    double lookup(double lat1, double lon1, double lat2, double lon2) const {
+        if (!enabled) return -1;
+        if (abs(lat1 - lat2) < 1e-6 && abs(lon1 - lon2) < 1e-6) return 0.0;
+
+        string k1 = makeKey(lat1, lon1);
+        string k2 = makeKey(lat2, lon2);
+        auto it1 = locIndex_.find(k1);
+        auto it2 = locIndex_.find(k2);
+        if (it1 == locIndex_.end() || it2 == locIndex_.end()) return -1;
+
+        return matrix_[it1->second * N_ + it2->second];
+    }
+
+private:
+    size_t N_{0};
+    vector<pair<double,double>> coords_;
+    vector<double> matrix_;
+    unordered_map<string, size_t> locIndex_;
+
+    static string makeKey(double lat, double lon) {
+        // Match with 5-decimal precision
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.5f,%.5f", lat, lon);
+        return string(buf);
+    }
+};
+
+static DistanceMatrix gDistMatrix;
+
 // ============== UTILITY FUNCTIONS ==============
 
 double getDistance(const Location& a, const Location& b) {
-    // ALL distance calculations MUST go through MapDistance
-    // MapDistance handles: API key present -> real API calls, no key -> Haversine * 1.4
+    // Use pre-computed matrix if available
+    if (gDistMatrix.enabled) {
+        double d = gDistMatrix.lookup(a.lat, a.lon, b.lat, b.lon);
+        if (d >= 0) return d;
+    }
+    // Fallback to individual API call
     if (!gMapDist) {
-        cerr << "[FATAL] MapDistance not initialized! This should never happen." << endl;
+        cerr << "[FATAL] MapDistance not initialized!" << endl;
         exit(1);
     }
     return gMapDist->distance(a.lat, a.lon, b.lat, b.lon);
@@ -856,16 +930,22 @@ int main(int argc, char** argv) {
     
     cout << "Input: " << requests.size() << " requests, " << vehicles.size() << " vehicles" << endl;
     cout << "Weights: cost=" << gCtx.wCost << ", time=" << gCtx.wTime << endl;
-    
+
+    // Pre-compute NxN distance matrix (1 API call instead of thousands)
+    if (allowExternal && mapProvider != MapProvider::HAVERSINE) {
+        cout << "\nPre-computing distance matrix via Table API..." << endl;
+        gDistMatrix.build(vehicles, requests, mapDist);
+    }
+
     // Parse time limit from config (default 60s total for solver)
     int solverTimeLimitSec = 60;
     if (j.contains("config") && j["config"].contains("solver_time_limit_sec")) {
         solverTimeLimitSec = j["config"]["solver_time_limit_sec"].get<int>();
     }
     cout << "Solver time limit: " << solverTimeLimitSec << "s" << endl;
-    
+
     auto solverStart = chrono::steady_clock::now();
-    
+
     // Multiple restarts for better solution (cap at 15s or 10 restarts)
     cout << "\nPhase 1: Constructive Heuristic (multi-start)..." << endl;
     mt19937 gen(42);
@@ -920,31 +1000,72 @@ int main(int argc, char** argv) {
     double totalDist = 0, totalTime = 0;
     int vehiclesUsed = 0;
     
+    // Build baseline lookup by employeeId
+    unordered_map<string, const BaselineEntry*> baselineLookup;
+    for (const auto& b : gCtx.baseline) {
+        baselineLookup[b.employeeId] = &b;
+    }
+
     out["routes"] = json::array();
     for (auto& rt : finalSol.routes) {
         json jr;
         jr["vehicleId"] = rt.vehicleId;
-        jr["vehicleIdStr"] = (rt.vehicleId < static_cast<int>(vehicles.size())) ? vehicles[rt.vehicleId].vehicleId : "";
+        const Vehicle& veh = (rt.vehicleId < static_cast<int>(vehicles.size())) ? vehicles[rt.vehicleId] : vehicles[0];
+        jr["vehicleIdStr"] = veh.vehicleId;
         jr["totalDist"] = rt.totalDist;
         jr["totalTime"] = rt.totalTime;
         jr["totalCost"] = rt.totalCost;
         jr["penaltyCost"] = rt.penaltyCost;
+
+        // Vehicle biodata
+        jr["vehicleType"] = veh.type;
+        jr["fuelType"] = veh.fuelType;
+        jr["category"] = veh.category;
+        jr["capacity"] = veh.capacity;
+        jr["costPerKm"] = veh.costPerKm;
+        jr["speed"] = veh.speed > 0 ? veh.speed : gCtx.defaultSpeedKmph;
+        jr["startLat"] = veh.startLoc.lat;
+        jr["startLon"] = veh.startLoc.lon;
+        jr["availabilityTime"] = veh.availabilityTime;
+
+        // Baseline aggregation: sum baseline cost/time for employees on this route
+        double routeBaselineCost = 0;
+        double routeBaselineTime = 0;
+        unordered_set<string> routeEmployees;
+
         jr["stops"] = json::array();
-        
         for (auto& s : rt.stops) {
             json js;
             js["reqId"] = s.reqId;
-            js["employeeId"] = requests[s.reqId].employeeId;
+            const string& empId = requests[s.reqId].employeeId;
+            js["employeeId"] = empId;
             js["type"] = (s.type == PICKUP) ? "pickup" : "dropoff";
             js["lat"] = s.loc.lat;
             js["lon"] = s.loc.lon;
             js["arrivalTime"] = s.arrivalTime;
             js["waitTime"] = s.waitTime;
+            js["vehiclePreference"] = requests[s.reqId].vehiclePreference;
             jr["stops"].push_back(js);
+
+            // Collect unique employees for baseline
+            if (s.type == PICKUP) {
+                routeEmployees.insert(empId);
+            }
         }
-        
+
+        // Sum baseline for employees on this route
+        for (const auto& empId : routeEmployees) {
+            auto it = baselineLookup.find(empId);
+            if (it != baselineLookup.end()) {
+                routeBaselineCost += it->second->baselineCost;
+                routeBaselineTime += it->second->baselineTime;
+            }
+        }
+        jr["baselineCost"] = routeBaselineCost;
+        jr["baselineTime"] = routeBaselineTime;
+
         out["routes"].push_back(jr);
-        
+
         if (!rt.stops.empty()) {
             ++vehiclesUsed;
             totalDist += rt.totalDist;
@@ -955,6 +1076,16 @@ int main(int argc, char** argv) {
     out["summary"]["vehiclesUsed"] = vehiclesUsed;
     out["summary"]["totalDistance"] = totalDist;
     out["summary"]["totalTime"] = totalTime;
+
+    // Total baseline for cost savings comparison
+    double totalBaselineCost = 0, totalBaselineTime = 0;
+    for (const auto& b : gCtx.baseline) {
+        totalBaselineCost += b.baselineCost;
+        totalBaselineTime += b.baselineTime;
+    }
+    out["summary"]["totalBaselineCost"] = totalBaselineCost;
+    out["summary"]["totalBaselineTime"] = totalBaselineTime;
+
     out["unassigned"] = finalSol.unassignedReqs;
 
     // Distance method metadata for frontend fallback notice

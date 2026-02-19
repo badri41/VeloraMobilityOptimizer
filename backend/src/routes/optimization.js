@@ -109,6 +109,15 @@ function prepareInput(data) {
     prepared.config.tolerances = data.metadata.maxDelayByPriority;
   }
 
+  // Pass baseline data through to solver
+  if (data.baseline && Array.isArray(data.baseline) && data.baseline.length > 0) {
+    prepared.baseline = data.baseline.map((b) => ({
+      employee_id: b.employee_id || b.employeeId || "",
+      baseline_cost: b.baseline_cost || b.baselineCost || 0,
+      baseline_time_min: b.baseline_time_min || b.baselineTime || 0,
+    }));
+  }
+
   return prepared;
 }
 
@@ -359,16 +368,69 @@ function postProcess(solverOutput, preparedInput) {
       : (solverOutput.unassigned || []).length;
   const globalCost = rawSummary.globalCost || totalMoneyCost;
 
+  // Enrich unassigned: solver outputs plain integer IDs [0, 3, 5]
+  // Convert to objects with employee details for frontend display
+  const rawUnassigned = solverOutput.unassigned || [];
+  const requestLookup = {};
+  preparedInput.requests.forEach((r) => { requestLookup[r.id] = r; });
+
+  const enrichedUnassigned = rawUnassigned.map((item) => {
+    // Already an object? pass through
+    if (typeof item === "object" && item !== null) return item;
+    // Plain integer reqId — enrich from prepared input
+    const req = requestLookup[item];
+    return {
+      reqId: item,
+      employeeId: req?.employee_id || `Req-${item}`,
+      priority: req?.priority || 3,
+      earlyTime: req?.earlyTime || 0,
+      lateTime: req?.lateTime || 90,
+      vehiclePreference: req?.vehiclePreference || "any",
+    };
+  });
+
+  // Per-vehicle baseline aggregation fallback:
+  // If solver didn't include baselineCost, compute from preparedInput.baseline
+  const baselineData = preparedInput.baseline || [];
+  if (baselineData.length > 0) {
+    const baselineByEmp = {};
+    baselineData.forEach((b) => {
+      baselineByEmp[b.employee_id] = b;
+    });
+
+    for (const route of enrichedRoutes) {
+      if (route.baselineCost === undefined || route.baselineCost === 0) {
+        let routeBaselineCost = 0;
+        let routeBaselineTime = 0;
+        const seen = new Set();
+        for (const stop of (route.stops || [])) {
+          const empId = stop.employeeId;
+          if (empId && !seen.has(empId) && stop.type === "pickup") {
+            seen.add(empId);
+            const bl = baselineByEmp[empId];
+            if (bl) {
+              routeBaselineCost += bl.baseline_cost || 0;
+              routeBaselineTime += bl.baseline_time_min || 0;
+            }
+          }
+        }
+        route.baselineCost = routeBaselineCost;
+        route.baselineTime = routeBaselineTime;
+      }
+    }
+  }
+
   // Stage 9a: Constraint analysis
   const constraintAnalysis = analyzeConstraints(
     enrichedRoutes,
     preparedInput,
-    solverOutput.unassigned || []
+    rawUnassigned
   );
 
   return {
     routes: enrichedRoutes,
-    unassigned: solverOutput.unassigned || [],
+    unassigned: enrichedUnassigned,
+    unassignedRequests: enrichedUnassigned,
     summary: {
       totalMoneyCost,
       totalDistance,
