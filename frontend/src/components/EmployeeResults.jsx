@@ -239,6 +239,12 @@ export default function EmployeeResults({ solution, inputData, onEmployeeHover }
                     Sharing: {req?.sharingLimit === 1 ? "Single" : req?.sharingLimit === 100 || req?.sharingLimit === 999 ? "Any" : `Max ${req?.sharingLimit}`}
                   </span>
                 </div>
+                {req?.vehiclePreference && req.vehiclePreference !== "any" && (
+                  <div className="footer-metric footer-metric-pref">
+                    <Truck size={12} />
+                    <span>Pref: {req.vehiclePreference}</span>
+                  </div>
+                )}
               </div>
 
               {/* Constraint notes (filter out wait-time info since it's shown inline above) */}
@@ -334,6 +340,7 @@ export default function EmployeeResults({ solution, inputData, onEmployeeHover }
         /* Footer */
         .emp-footer-metrics { display: flex; gap: 12px; }
         .footer-metric { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 600; color: var(--text-dim); background: var(--bg-glass); padding: 4px 10px; border-radius: 6px; }
+        .footer-metric-pref { background: rgba(168, 85, 247, 0.1); color: #a855f7; }
 
         /* Constraint notes */
         .constraint-notes { display: flex; flex-direction: column; gap: 6px; }

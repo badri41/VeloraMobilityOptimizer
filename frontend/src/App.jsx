@@ -54,6 +54,7 @@ function buildSolution(result) {
     data: {
       routes,
       unassigned,
+      unassignedRequests: result.unassignedRequests || unassigned,
       summary: { totalMoneyCost, totalDistance, totalTime, vehiclesUsed, unassignedCount, globalCost, ...summary },
       constraintAnalysis: result.constraintAnalysis || [],
     },
@@ -188,9 +189,10 @@ export default function App() {
             })),
             metadata: { maxDelayByPriority: jsonData.config?.tolerances || { 1: 5, 2: 10, 3: 15, 4: 20, 5: 30 } },
             config: jsonData.config,
+            baseline: jsonData.baseline || [],
           };
         } else if (jsonData.vehicles && jsonData.requests) {
-          output = jsonData;
+          output = { ...jsonData, baseline: jsonData.baseline || [] };
         } else {
           throw new Error("Invalid JSON format. Must contain vehicles and requests, or routes and summary.");
         }
@@ -225,6 +227,7 @@ export default function App() {
           metadata: {
             maxDelayByPriority: parsed.config?.tolerances || { 1: 5, 2: 10, 3: 15, 4: 20, 5: 30 },
           },
+          baseline: parsed.baseline || [],
         };
       }
 
@@ -269,6 +272,7 @@ export default function App() {
         vehicles: inputData.vehicles,
         requests: inputData.requests,
         metadata: inputData.metadata,
+        baseline: inputData.baseline || [],
       };
 
       const response = await submitOptimization(payload);

@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { List, Info, AlertTriangle, Cpu, Truck, UserCheck, CheckCircle, XCircle, Users, Shield, Clock, DollarSign, Route } from "lucide-react";
+import { List, Info, AlertTriangle, Cpu, Truck, UserCheck, CheckCircle, XCircle, Users, Shield, Clock, DollarSign, Route, TrendingDown } from "lucide-react";
 import RoutesTable from "./RoutesTable.jsx";
 
 export default function ResultsPanel({ solution, inputData }) {
@@ -121,6 +121,42 @@ export default function ResultsPanel({ solution, inputData }) {
         </div>
       </div>
 
+      {/* Cost Savings Banner */}
+      {data.summary.totalBaselineCost > 0 && (() => {
+        const baseline = data.summary.totalBaselineCost;
+        const optimized = data.summary.totalMoneyCost || 0;
+        const saving = baseline - optimized;
+        const pct = (saving / baseline * 100);
+        const baselineTime = data.summary.totalBaselineTime || 0;
+        const optTime = data.summary.totalTime || 0;
+        const timeSaving = baselineTime - optTime;
+        return (
+          <div className={`glass-card savings-banner ${saving >= 0 ? "savings-positive" : "savings-negative"}`}>
+            <div className="savings-icon">
+              <TrendingDown size={28} />
+            </div>
+            <div className="savings-content">
+              <h4>Cost Savings vs Baseline</h4>
+              <div className="savings-figures">
+                <div className="savings-figure">
+                  <span className="savings-amount">{saving >= 0 ? "-" : "+"}₹{Math.abs(saving).toFixed(0)}</span>
+                  <span className="savings-pct">({Math.abs(pct).toFixed(1)}% {saving >= 0 ? "saved" : "increase"})</span>
+                </div>
+                <div className="savings-detail">
+                  <span>Baseline: ₹{baseline.toFixed(0)}</span>
+                  <span>Optimized: ₹{optimized.toFixed(0)}</span>
+                </div>
+                {baselineTime > 0 && (
+                  <div className="savings-detail">
+                    <span>Time: {timeSaving >= 0 ? "-" : "+"}{Math.abs(timeSaving).toFixed(0)} min</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Distance method fallback notice */}
       {data.summary.distanceMethod && data.summary.distanceMethod.fallbackUsed && (
         <div className="glass-card fallback-notice">
@@ -145,20 +181,27 @@ export default function ResultsPanel({ solution, inputData }) {
         <RoutesTable routes={data.routes} inputData={inputData} />
       </div>
 
-      {data.unassignedRequests?.length > 0 && (
-        <div className="glass-card warning-card">
-          <div className="warning-header">
-            <AlertTriangle size={20} color="#fbbf24" />
-            <h3>Unassigned Logistics Targets</h3>
+      {((data.unassignedRequests?.length > 0) || (data.unassigned?.length > 0)) && (() => {
+        const unassigned = data.unassignedRequests || data.unassigned || [];
+        return (
+          <div className="glass-card warning-card">
+            <div className="warning-header">
+              <AlertTriangle size={20} color="#fbbf24" />
+              <h3>Unassigned Logistics Targets</h3>
+            </div>
+            <p>The following requests could not be optimized within current constraints:</p>
+            <div className="unassigned-list">
+              {unassigned.map((req, index) => {
+                // Handle both enriched objects and plain integer IDs
+                const label = typeof req === "object" && req !== null
+                  ? (req.employeeId || `Req-${req.reqId ?? index}`)
+                  : `Req-${req}`;
+                return <span key={index} className="unassigned-chip">Target {label}</span>;
+              })}
+            </div>
           </div>
-          <p>The following requests could not be optimized within current constraints:</p>
-          <div className="unassigned-list">
-            {data.unassignedRequests.map((req, index) => (
-              <span key={index} className="unassigned-chip">Target {req.employeeId || index}</span>
-            ))}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       <style>{`
         .results-panel-v2 { display: flex; flex-direction: column; gap: 24px; }
@@ -195,6 +238,22 @@ export default function ResultsPanel({ solution, inputData }) {
         .warning-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
         .unassigned-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
         .unassigned-chip { padding: 4px 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 100px; font-size: 0.75rem; color: #f87171; }
+
+        /* Cost Savings Banner */
+        .savings-banner { display: flex; align-items: center; gap: 20px; padding: 20px 24px; }
+        .savings-positive { background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); }
+        .savings-negative { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); }
+        .savings-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .savings-positive .savings-icon { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .savings-negative .savings-icon { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .savings-content h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 8px; }
+        .savings-figures { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; }
+        .savings-figure { display: flex; align-items: baseline; gap: 8px; }
+        .savings-amount { font-family: var(--font-display); font-size: 1.8rem; font-weight: 800; }
+        .savings-positive .savings-amount { color: #10b981; }
+        .savings-negative .savings-amount { color: #ef4444; }
+        .savings-pct { font-size: 0.85rem; font-weight: 600; color: var(--text-dim); }
+        .savings-detail { display: flex; gap: 16px; font-size: 0.78rem; color: var(--text-dim); }
 
         /* Fallback notice */
         .fallback-notice { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); }
