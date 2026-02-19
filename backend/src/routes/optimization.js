@@ -56,17 +56,14 @@ function validateInput(data) {
 // ─── Stage 6: Input Preparation ───────────────────────────────────────────────
 
 function prepareInput(data) {
+  const incomingConfig = data.config || {};
   const prepared = {
     config: {
-      allow_external_maps: data.config?.allow_external_maps ?? false,
-      maps_api_key: data.config?.maps_api_key || "",
-      map_provider: data.config?.map_provider || "haversine",
-      map_timeout_ms: data.config?.map_timeout_ms || 1500,
-      map_max_retries: data.config?.map_max_retries || 1,
-      // Time limit for solver (seconds). Keeps total runtime well under Render's limits.
-      solver_time_limit_sec: data.config?.solver_time_limit_sec || 60,
-      ...(data.config?.weights && { weights: data.config.weights }),
-      ...(data.config?.tolerances && { tolerances: data.config.tolerances }),
+      allow_external_maps: incomingConfig.allow_external_maps || false,
+      maps_api_key: incomingConfig.maps_api_key || "",
+      ...(incomingConfig.weights ? { weights: incomingConfig.weights } : {}),
+      ...(incomingConfig.tolerances ? { tolerances: incomingConfig.tolerances } : {}),
+      ...(incomingConfig.penalty_weights ? { penalty_weights: incomingConfig.penalty_weights } : {}),
     },
     vehicles: data.vehicles.map((v, i) => ({
       id: v.id !== undefined ? v.id : i,
@@ -488,17 +485,16 @@ router.post(
 );
 
 // ─── POST /api/optimize/json — JSON → Validate → Prepare → Solve → Post-process
-// Now ASYNC: returns jobId immediately and processes in background.
-// Frontend polls GET /api/results/:jobId for the result.
 
 router.post("/optimize/json", async (req, res) => {
   const jobId = uuidv4();
+  const startTime = Date.now();
 
   const inputPath = path.join(UPLOADS_DIR, `${jobId}_input.json`);
   const outputPath = path.join(OUTPUTS_DIR, `${jobId}_output.json`);
 
   try {
-    // Stage 5: Validation (synchronous — fast)
+    // Stage 5: Validation
     const validationErrors = validateInput(req.body);
     if (validationErrors.length > 0) {
       return res.status(400).json({
@@ -507,48 +503,22 @@ router.post("/optimize/json", async (req, res) => {
       });
     }
 
-    // Stage 6: Input Preparation (synchronous — fast)
+    // Stage 6: Input Preparation
     const preparedInput = prepareInput(req.body);
     fs.writeFileSync(inputPath, JSON.stringify(preparedInput, null, 2));
 
-    // Create job record so frontend can poll status
-    const jobQueue = require("../services/jobQueue");
-    jobQueue.createJob(jobId, inputPath);
-    jobQueue.updateJob(jobId, { status: "processing", stage: "solving", progress: 20 });
+    // Stage 7 & 8: Run C++ solver
+    const solverOutput = await solver.run(inputPath, outputPath);
 
-    // Respond IMMEDIATELY with jobId — don't wait for solver
-    res.json({ jobId, status: "processing", solutionId: jobId });
+    // Stage 9: Post-Processing
+    const result = postProcess(solverOutput, preparedInput);
 
-    // Process solver in background (non-blocking)
-    const startTime = Date.now();
-    solver.run(inputPath, outputPath)
-      .then((solverOutput) => {
-        // Stage 9: Post-Processing
-        const result = postProcess(solverOutput, preparedInput);
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-        console.log(`[Job ${jobId}] Completed in ${elapsed}s`);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[Job ${jobId}] Completed in ${elapsed}s`);
 
-        // Save result to output file for GET /api/results/:jobId
-        fs.writeFileSync(outputPath, JSON.stringify(result, null, 2));
-
-        // Update job status
-        jobQueue.updateJob(jobId, {
-          status: "complete",
-          stage: "complete",
-          progress: 100,
-          result,
-        });
-      })
-      .catch((error) => {
-        console.error(`[Job ${jobId}] Failed:`, error.message);
-        jobQueue.updateJob(jobId, {
-          status: "error",
-          error: error.message,
-        });
-      });
-
+    res.json({ jobId, status: "success", result });
   } catch (error) {
-    console.error(`[Job ${jobId}] Validation/prep failed:`, error.message);
+    console.error(`[Job ${jobId}] Failed:`, error.message);
     res.status(500).json({ jobId, status: "error", error: error.message });
   }
 });
@@ -562,27 +532,6 @@ router.get("/results/:jobId", (req, res) => {
     return res.status(400).json({ error: "Invalid job ID format" });
   }
 
-  // Check job queue first (for async jobs that are still processing)
-  const jobQueue = require("../services/jobQueue");
-  const job = jobQueue.getJob(jobId);
-
-  if (job) {
-    if (job.status === "complete" && job.result) {
-      return res.json({ jobId, status: "success", result: job.result });
-    }
-    if (job.status === "error") {
-      return res.json({ jobId, status: "failed", error: job.error });
-    }
-    // Still processing
-    return res.json({
-      jobId,
-      status: job.status || "processing",
-      stage: job.stage,
-      progress: job.progress,
-    });
-  }
-
-  // Fallback: check output file on disk
   const outputPath = path.join(OUTPUTS_DIR, `${jobId}_output.json`);
   if (fs.existsSync(outputPath)) {
     try {
@@ -593,7 +542,7 @@ router.get("/results/:jobId", (req, res) => {
     }
   }
 
-  return res.status(404).json({ jobId, status: "not_found", error: "Job not found" });
+  return optimizationController.getJobResult(req, res);
 });
 
 // ─── Other endpoints ─────────────────────────────────────────────────────────

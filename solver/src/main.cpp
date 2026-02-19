@@ -27,7 +27,6 @@
 #include <numeric>
 #include <unordered_set>
 #include <unordered_map>
-#include <chrono>
 
 #include "json.hpp"
 #include "map_distance.hpp"
@@ -722,8 +721,7 @@ Solution twoOptMove(const Solution& current, const vector<Request>& reqs,
 // ============== SIMULATED ANNEALING ==============
 
 Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs,
-                            const vector<Vehicle>& vehicles, mt19937& gen,
-                            int timeLimitSeconds = 45) {
+                            const vector<Vehicle>& vehicles, mt19937& gen) {
     
     Solution current = initial;
     Solution best = initial;
@@ -738,17 +736,7 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
     int noImproveCount = 0;
     int iteration = 0;
     
-    // Wall-clock time limit to prevent timeout on slow deployment hardware
-    auto startTime = chrono::steady_clock::now();
-    auto timeLimit = chrono::seconds(timeLimitSeconds);
-    
     while (T > Tmin && noImproveCount < maxNoImprove) {
-        // Check time limit every temperature step
-        auto elapsed = chrono::steady_clock::now() - startTime;
-        if (elapsed > timeLimit) {
-            cout << "SA time limit reached (" << timeLimitSeconds << "s), stopping early." << endl;
-            break;
-        }
         for (int iter = 0; iter < maxIterPerTemp; ++iter) {
             ++iteration;
             
@@ -797,8 +785,7 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
         T *= alpha;
     }
     
-    cout << "SA completed: " << iteration << " iterations, final temp: " << T 
-         << ", time: " << chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - startTime).count() << "ms" << endl;
+    cout << "SA completed: " << iteration << " iterations, final temp: " << T << endl;
     return best;
 }
 
@@ -864,6 +851,21 @@ int main(int argc, char** argv) {
                     throw std::runtime_error("Invalid priority key in tolerances: " + key);
                 }
             }
+        }
+
+        if (cfg.contains("penalty_weights")) {
+            auto& pw = cfg["penalty_weights"];
+            gCtx.lateArrivalPenaltyPerMin = pw.value("lateArrivalPenaltyPerMin", gCtx.lateArrivalPenaltyPerMin);
+            gCtx.sharingViolationPenalty = pw.value("sharingViolationPenalty", gCtx.sharingViolationPenalty);
+            gCtx.vehiclePrefViolationPenalty = pw.value("vehiclePrefViolationPenalty", gCtx.vehiclePrefViolationPenalty);
+            gCtx.unassignedPenalty = pw.value("unassignedPenalty", gCtx.unassignedPenalty);
+            gCtx.maxDelayViolationPenalty = pw.value("maxDelayViolationPenalty", gCtx.maxDelayViolationPenalty);
+            cout << "Custom penalty weights loaded: "
+                 << "latePerMin=" << gCtx.lateArrivalPenaltyPerMin
+                 << ", sharing=" << gCtx.sharingViolationPenalty
+                 << ", vehPref=" << gCtx.vehiclePrefViolationPenalty
+                 << ", unassigned=" << gCtx.unassignedPenalty
+                 << ", maxDelay=" << gCtx.maxDelayViolationPenalty << endl;
         }
     }
 
@@ -937,32 +939,16 @@ int main(int argc, char** argv) {
         gDistMatrix.build(vehicles, requests, mapDist);
     }
 
-    // Parse time limit from config (default 60s total for solver)
-    int solverTimeLimitSec = 60;
-    if (j.contains("config") && j["config"].contains("solver_time_limit_sec")) {
-        solverTimeLimitSec = j["config"]["solver_time_limit_sec"].get<int>();
-    }
-    cout << "Solver time limit: " << solverTimeLimitSec << "s" << endl;
-
-    auto solverStart = chrono::steady_clock::now();
-
-    // Multiple restarts for better solution (cap at 15s or 10 restarts)
+    // Multiple restarts for better solution
     cout << "\nPhase 1: Constructive Heuristic (multi-start)..." << endl;
     mt19937 gen(42);
     Solution bestInit;
     bestInit.globalCost = numeric_limits<double>::max();
     
-    int maxRestarts = 10;
-    for (int restart = 0; restart < maxRestarts; ++restart) {
+    for (int restart = 0; restart < 10; ++restart) {
         Solution init = constructInitialSolution(requests, vehicles, gen);
         if (init.globalCost < bestInit.globalCost) {
             bestInit = std::move(init);
-        }
-        // Don't spend more than 25% of time budget on construction
-        auto elapsed = chrono::steady_clock::now() - solverStart;
-        if (elapsed > chrono::seconds(solverTimeLimitSec / 4)) {
-            cout << "Construction time limit reached after " << (restart + 1) << " restarts." << endl;
-            break;
         }
     }
     
@@ -970,20 +956,14 @@ int main(int argc, char** argv) {
          << ", penalty=" << bestInit.totalPenaltyCost 
          << ", unassigned=" << bestInit.unassignedReqs.size() << endl;
     
-    // Compute remaining time for SA (leave 5s buffer for output)
-    auto constructionElapsed = chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - solverStart).count();
-    int saTimeLimit = max(5, solverTimeLimitSec - (int)constructionElapsed - 5);
-    
     // Improve with SA
-    cout << "\nPhase 2: Simulated Annealing optimization (time limit: " << saTimeLimit << "s)..." << endl;
-    Solution finalSol = simulatedAnnealing(bestInit, requests, vehicles, gen, saTimeLimit);
+    cout << "\nPhase 2: Simulated Annealing optimization..." << endl;
+    Solution finalSol = simulatedAnnealing(bestInit, requests, vehicles, gen);
     
-    auto totalElapsed = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - solverStart).count();
     cout << "\nFinal solution: cost=" << fixed << setprecision(2) << finalSol.totalMoneyCost 
          << ", penalty=" << finalSol.totalPenaltyCost 
          << ", global=" << finalSol.globalCost
-         << ", unassigned=" << finalSol.unassignedReqs.size() 
-         << ", total_time=" << totalElapsed << "ms" << endl;
+         << ", unassigned=" << finalSol.unassignedReqs.size() << endl;
     
     // Output JSON
     json out;
@@ -994,7 +974,18 @@ int main(int argc, char** argv) {
         {"unassignedCount", finalSol.unassignedReqs.size()},
         {"vehiclesUsed", 0},
         {"totalDistance", 0.0},
-        {"totalTime", 0.0}
+        {"totalTime", 0.0},
+        {"penaltyWeightsUsed", {
+            {"lateArrivalPenaltyPerMin", gCtx.lateArrivalPenaltyPerMin},
+            {"sharingViolationPenalty", gCtx.sharingViolationPenalty},
+            {"vehiclePrefViolationPenalty", gCtx.vehiclePrefViolationPenalty},
+            {"unassignedPenalty", gCtx.unassignedPenalty},
+            {"maxDelayViolationPenalty", gCtx.maxDelayViolationPenalty}
+        }},
+        {"objectiveWeightsUsed", {
+            {"wCost", gCtx.wCost},
+            {"wTime", gCtx.wTime}
+        }}
     };
     
     double totalDist = 0, totalTime = 0;
