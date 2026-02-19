@@ -25,6 +25,30 @@ export default function EmployeeResults({ solution, inputData, onEmployeeHover }
     constraintMap[c.employeeId] = c;
   });
 
+  // Build baseline lookup by employeeId from inputData
+  const baselineMap = {};
+  (inputData?.baseline || []).forEach((b) => {
+    const empId = b.employee_id || b.employeeId;
+    if (empId) baselineMap[empId] = b;
+  });
+
+  // Compute per-employee optimized cost (equal share of route cost among passengers)
+  const empOptCostMap = {};
+  routes.forEach((route) => {
+    const uniqueEmps = new Set(
+      (route.stops || [])
+        .filter((s) => s.type?.toLowerCase() === "pickup")
+        .map((s) => s.employeeId)
+        .filter(Boolean)
+    );
+    const count = uniqueEmps.size;
+    if (count === 0) return;
+    const share = (route.totalCost || 0) / count;
+    uniqueEmps.forEach((empId) => {
+      empOptCostMap[empId] = (empOptCostMap[empId] || 0) + share;
+    });
+  });
+
   // Build employee trips from routes
   const employeeTrips = {};
 
@@ -121,6 +145,17 @@ export default function EmployeeResults({ solution, inputData, onEmployeeHover }
             emp.pickupTime !== null && emp.dropoffTime !== null
               ? emp.dropoffTime - emp.pickupTime
               : null;
+
+          // Cost / time metrics
+          const bl = baselineMap[emp.employeeId];
+          const baselineCost = bl?.baseline_cost ?? null;
+          const baselineTime = bl?.baseline_time_min ?? null;
+          const optimizedCost = empOptCostMap[emp.employeeId] ?? null;
+          const optimizedTime = travelTime;
+          const costSaved = baselineCost != null && optimizedCost != null ? baselineCost - optimizedCost : null;
+          const pctSaved = baselineCost != null && baselineCost > 0 && costSaved != null ? (costSaved / baselineCost) * 100 : null;
+          const timeSaved = baselineTime != null && optimizedTime != null ? baselineTime - optimizedTime : null;
+          const timeSavedPct = baselineTime != null && baselineTime > 0 && timeSaved != null ? (timeSaved / baselineTime) * 100 : null;
 
           const overallStatus = constraint?.overallStatus || "on_time";
 
@@ -247,6 +282,57 @@ export default function EmployeeResults({ solution, inputData, onEmployeeHover }
                 )}
               </div>
 
+              {/* Cost & Time Metrics */}
+              {(baselineCost != null || optimizedCost != null) && (
+                <div className="emp-cost-metrics">
+                  <div className="cost-metrics-header">Cost &amp; Time Summary</div>
+                  <div className="cost-metrics-grid">
+                    {baselineCost != null && (
+                      <div className="cost-metric-item">
+                        <span className="cm-label">Baseline Cost</span>
+                        <span className="cm-value cm-baseline">₹{baselineCost.toFixed(0)}</span>
+                      </div>
+                    )}
+                    {optimizedCost != null && (
+                      <div className="cost-metric-item">
+                        <span className="cm-label">Optimized Cost</span>
+                        <span className="cm-value cm-optimized">₹{optimizedCost.toFixed(0)}</span>
+                      </div>
+                    )}
+                    {baselineTime != null && (
+                      <div className="cost-metric-item">
+                        <span className="cm-label">Baseline Time</span>
+                        <span className="cm-value">{baselineTime.toFixed(0)} min</span>
+                      </div>
+                    )}
+                    {optimizedTime != null && (
+                      <div className="cost-metric-item">
+                        <span className="cm-label">Optimized Time</span>
+                        <span className="cm-value">{optimizedTime.toFixed(0)} min</span>
+                      </div>
+                    )}
+                    {pctSaved != null && (
+                      <div className="cost-metric-item cost-metric-savings">
+                        <span className="cm-label">% Saved</span>
+                        <span className={`cm-value ${pctSaved >= 0 ? "cm-positive" : "cm-negative"}`}>
+                          {pctSaved >= 0 ? "▼" : "▲"} {Math.abs(pctSaved).toFixed(1)}%
+                        </span>
+                      </div>
+                    )}
+                    {timeSaved != null && (
+                      <div className="cost-metric-item cost-metric-savings">
+                        <span className="cm-label">{timeSaved >= 0 ? "Time Saved" : "No Time Saving"}</span>
+                        <span className={`cm-value ${timeSaved >= 0 ? "cm-positive" : "cm-negative"}`}>
+                          {timeSaved >= 0
+                            ? `▼ ${timeSaved.toFixed(0)} min (${timeSavedPct != null ? timeSavedPct.toFixed(1) : "0.0"}%)`
+                            : `▲ ${Math.abs(timeSaved).toFixed(0)} min longer`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Constraint notes (filter out wait-time info since it's shown inline above) */}
               {constraint?.notes?.filter((n) => !(n.type === "info" && n.text.includes("waited for pickup window"))).length > 0 && (
                 <div className="constraint-notes">
@@ -341,6 +427,19 @@ export default function EmployeeResults({ solution, inputData, onEmployeeHover }
         .emp-footer-metrics { display: flex; gap: 12px; }
         .footer-metric { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; font-weight: 600; color: var(--text-dim); background: var(--bg-glass); padding: 4px 10px; border-radius: 6px; }
         .footer-metric-pref { background: rgba(168, 85, 247, 0.1); color: #a855f7; }
+
+        /* Cost & Time Metrics */
+        .emp-cost-metrics { padding: 12px 14px; background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.15); border-radius: 10px; }
+        .cost-metrics-header { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 10px; }
+        .cost-metrics-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        .cost-metric-item { display: flex; flex-direction: column; gap: 2px; }
+        .cost-metric-savings { grid-column: 1 / -1; }
+        .cm-label { font-size: 0.6rem; font-weight: 600; text-transform: uppercase; color: var(--text-dim); }
+        .cm-value { font-family: var(--font-display); font-size: 0.88rem; font-weight: 700; color: var(--text-bright); }
+        .cm-baseline { color: var(--text-dim); text-decoration: line-through; }
+        .cm-optimized { color: var(--primary); }
+        .cm-positive { color: #10b981; }
+        .cm-negative { color: #ef4444; }
 
         /* Constraint notes */
         .constraint-notes { display: flex; flex-direction: column; gap: 6px; }

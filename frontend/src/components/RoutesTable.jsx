@@ -1,5 +1,5 @@
 import React from "react";
-import { Truck, Navigation, Clock, Hash, Fuel, MapPin, TrendingDown, Zap, Gauge, Users } from "lucide-react";
+import { Truck, Navigation, Clock, Hash, Fuel, MapPin, TrendingDown, Gauge, Users } from "lucide-react";
 
 function StopRow({ stop, requestMap }) {
   const formatTime = (minutes) => {
@@ -27,7 +27,6 @@ function StopRow({ stop, requestMap }) {
         </div>
       </td>
       <td>{formatTime(stop.arrivalTime ?? stop.arrival)}</td>
-      <td>{typeof stop.waitTime === "number" ? stop.waitTime.toFixed(2) : "0"}m</td>
       <td><span className={`veh-pref-cell ${vehPref !== "any" && vehPref !== "-" ? "has-pref" : ""}`}>{vehPref}</span></td>
     </tr>
   );
@@ -75,12 +74,9 @@ export default function RoutesTable({ routes, inputData }) {
 
         // Baseline vs optimized
         const baselineCost = route.baselineCost || 0;
-        const baselineTime = route.baselineTime || 0;
         const optimizedCost = route.totalCost || 0;
-        const optimizedTime = route.totalTime || 0;
         const costSaving = baselineCost - optimizedCost;
         const costSavingPct = baselineCost > 0 ? (costSaving / baselineCost * 100) : 0;
-        const timeSaving = baselineTime - optimizedTime;
         const hasBaseline = baselineCost > 0;
 
         return (
@@ -140,14 +136,6 @@ export default function RoutesTable({ routes, inputData }) {
                       ₹{Math.abs(costSaving).toFixed(0)} ({costSavingPct.toFixed(1)}%)
                     </span>
                   </div>
-                  {baselineTime > 0 && (
-                    <div className="baseline-metric">
-                      <span className="bl-label">Time Saved</span>
-                      <span className={`bl-value ${timeSaving >= 0 ? "bl-positive" : "bl-negative"}`}>
-                        {Math.abs(timeSaving).toFixed(0)} min
-                      </span>
-                    </div>
-                  )}
                 </div>
               </div>
             )}
@@ -161,7 +149,6 @@ export default function RoutesTable({ routes, inputData }) {
                     <th>Employee</th>
                     <th>Coordinates</th>
                     <th>Arrival</th>
-                    <th>Wait</th>
                     <th>Veh Pref</th>
                   </tr>
                 </thead>

@@ -6,7 +6,10 @@ import {
   Users,
   List,
   FileJson,
+  FileSpreadsheet,
+  FileText,
 } from "lucide-react";
+import { downloadJSON, downloadExcel, downloadPDF } from "../utils/downloadUtils.js";
 import RouteMap from "./RouteMap.jsx";
 import CostComparison from "./CostComparison.jsx";
 import EmployeeResults from "./EmployeeResults.jsx";
@@ -34,32 +37,6 @@ export default function ResultsSection({ solution, inputData }) {
     );
   }
 
-  const handleDownloadReport = () => {
-    const report = {
-      timestamp: new Date().toISOString(),
-      solution,
-      inputData,
-      summary: {
-        totalRoutes: solution.routes?.length || 0,
-        totalDistance: solution.totalDistance || 0,
-        totalCost: solution.totalCost || 0,
-        savingsPercent: solution.savingsPercent || 0,
-      },
-    };
-
-    const blob = new Blob([JSON.stringify(report, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `velora-optimization-${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
   const tabs = [
     { id: "visualization", label: "Visualization", icon: Map },
     { id: "costs", label: "Analytics", icon: BarChart3 },
@@ -72,12 +49,17 @@ export default function ResultsSection({ solution, inputData }) {
       <div className="results-header-v2">
         <h2 className="results-title-v2">Optimization Intelligence</h2>
         <div className="download-actions-v2">
-          <button
-            className="btn btn-primary dl-btn-v2"
-            onClick={handleDownloadReport}
-          >
+          <button className="btn btn-secondary dl-btn-v2" onClick={() => downloadJSON(solution, inputData)}>
             <FileJson size={18} />
-            <span>Download JSON</span>
+            <span>JSON</span>
+          </button>
+          <button className="btn btn-secondary dl-btn-v2" onClick={() => downloadExcel(solution, inputData)}>
+            <FileSpreadsheet size={18} />
+            <span>Excel</span>
+          </button>
+          <button className="btn btn-secondary dl-btn-v2" onClick={() => downloadPDF(solution, inputData)}>
+            <FileText size={18} />
+            <span>PDF</span>
           </button>
         </div>
       </div>

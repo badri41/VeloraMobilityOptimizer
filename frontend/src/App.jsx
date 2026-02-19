@@ -16,13 +16,12 @@ import {
   Users,
   Sun,
   Moon,
-  MapPin,
-  Zap,
 } from "lucide-react";
 import HomePage from "./components/HomePage.jsx";
 import Header from "./components/Header.jsx";
 import FileUpload from "./components/FileUpload.jsx";
 import ResultsSection from "./components/ResultsSection.jsx";
+import PenaltyForm, { DEFAULT_PENALTY_WEIGHTS } from "./components/PenaltyForm.jsx";
 import { getSolution, submitOptimization, parseExcelFile } from "./api.js";
 
 const defaultStatus = "idle";
@@ -100,7 +99,7 @@ export default function App() {
   const [solution, setSolution] = useState(null);
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [distanceMethod, setDistanceMethod] = useState("haversine"); // "haversine" or "api"
+  const [penaltyWeights, setPenaltyWeights] = useState({ ...DEFAULT_PENALTY_WEIGHTS });
 
   const isReady = useMemo(
     () => inputData?.vehicles?.length && inputData?.requests?.length,
@@ -261,13 +260,10 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      const useApi = distanceMethod === "api";
       const payload = {
         config: {
-          ...inputData.config,
-          allow_external_maps: useApi,
-          map_provider: useApi ? (inputData.config?.map_provider || "osrm") : "haversine",
-          solver_time_limit_sec: useApi ? 300 : 60,
+          ...(inputData.config || {}),
+          penalty_weights: penaltyWeights,
         },
         vehicles: inputData.vehicles,
         requests: inputData.requests,
@@ -378,6 +374,8 @@ export default function App() {
             <FileUpload onFile={handleFile} fileName={fileName} isParsing={isParsing} onClear={handleClear} error={parseError} />
           </div>
 
+          <PenaltyForm weights={penaltyWeights} onChange={setPenaltyWeights} />
+
           <AnimatePresence>
             {fileName && (
               <motion.div
@@ -392,7 +390,7 @@ export default function App() {
                       <div className={`status-pulse ${status === "processing" ? "active" : status === "completed" ? "success" : ""}`} />
                       <span className="status-text-v2">
                         {status === "idle" && "Configuration Ready"}
-                        {status === "processing" && (distanceMethod === "api" ? "Optimizer Active (Map API — may take a few minutes)" : "Optimizer Active")}
+                        {status === "processing" && "Optimizer Active"}
                         {status === "completed" && "Optimization Success"}
                       </span>
                     </div>
@@ -405,33 +403,6 @@ export default function App() {
                   </div>
 
                   <div className="action-buttons-group">
-                    {/* Distance method toggle */}
-                    {isReady && (
-                      <div className="distance-method-picker">
-                        <span className="picker-label">Distance Method</span>
-                        <div className="picker-options">
-                          <button
-                            className={`picker-btn ${distanceMethod === "haversine" ? "selected" : ""}`}
-                            onClick={() => setDistanceMethod("haversine")}
-                            title="Fast: Haversine × 1.4 road factor. Completes in under 2 minutes."
-                          >
-                            <Zap size={14} />
-                            <span>Fast (Haversine)</span>
-                          </button>
-                          <button
-                            className={`picker-btn ${distanceMethod === "api" ? "selected" : ""}`}
-                            onClick={() => setDistanceMethod("api")}
-                            title="Accurate: Real road distances via Map API. May take 5-10 minutes."
-                          >
-                            <MapPin size={14} />
-                            <span>Accurate (Map API)</span>
-                          </button>
-                        </div>
-                        {distanceMethod === "api" && (
-                          <p className="picker-warning">⚠ Uses real road distances. May take 5–10 minutes for large datasets.</p>
-                        )}
-                      </div>
-                    )}
                     <button className="btn btn-primary optimize-btn-v2" onClick={handleOptimize} disabled={!isReady || isSubmitting}>
                       {isSubmitting ? (
                         <span className="loading-spinner">Processing...</span>
@@ -459,7 +430,7 @@ export default function App() {
           .step-label-v2 { font-family: var(--font-display); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
           .step-connector-v2 { width: 40px; height: 1px; background: var(--border-subtle); }
           .action-bar-premium { padding: 24px 32px; border-radius: var(--radius-lg); }
-          .action-bar-grid { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
+          .action-bar-grid { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
           .status-indicator-v2 { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
           .status-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
           .status-pulse.active { background: var(--primary); box-shadow: 0 0 10px var(--primary); animation: pulse 2s infinite; }
@@ -468,19 +439,9 @@ export default function App() {
           .dataset-chips { display: flex; gap: 8px; }
           .chip { display: flex; align-items: center; gap: 6px; padding: 4px 12px; background: var(--bg-glass); border-radius: 100px; font-size: 0.75rem; color: var(--text-dim); border: 1px solid var(--border-subtle); }
           .optimize-btn-v2 { min-width: 220px; }
-          .action-buttons-group { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
           .error-text-v2 { color: #ef4444; font-size: 0.85rem; margin-top: 12px; text-align: center; }
           .header-with-back { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
           .back-btn-compact { margin-top: 12px; }
-
-          /* Distance method picker */
-          .distance-method-picker { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; width: 100%; }
-          .picker-label { font-family: var(--font-display); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
-          .picker-options { display: flex; gap: 8px; }
-          .picker-btn { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); border: 1.5px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-dim); font-family: var(--font-main); font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; flex: 1; justify-content: center; }
-          .picker-btn:hover { border-color: var(--primary); color: var(--text-main); background: var(--primary-glow); }
-          .picker-btn.selected { border-color: var(--primary); color: var(--primary); background: var(--primary-glow); box-shadow: 0 0 12px var(--primary-glow); }
-          .picker-warning { font-size: 0.75rem; color: #f59e0b; margin: 0; line-height: 1.4; }
         `}</style>
       </div>
     </>

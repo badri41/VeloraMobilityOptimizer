@@ -59,7 +59,7 @@ async function fetchRoute(coordinates) {
 }
 
 // Component to render a single route with real road data
-function RealRoutePolyline({ stops, color, routeIndex }) {
+function RealRoutePolyline({ route, stops, color, routeIndex, isSelected, isFaded, onRouteClick }) {
   const [routeGeometry, setRouteGeometry] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -79,17 +79,37 @@ function RealRoutePolyline({ stops, color, routeIndex }) {
     loadRoute();
   }, [stops]);
 
+  const weight = isSelected ? 7 : isFaded ? 2 : 4;
+  const opacity = isSelected ? 0.95 : isFaded ? 0.2 : 0.55;
+
+  const employeeList = (stops || [])
+    .filter((s) => s.type === "pickup")
+    .map((s) => s.employeeId)
+    .filter(Boolean)
+    .join(", ");
+
+  const tooltipContent = (
+    <div style={{ borderLeft: `3px solid ${color}`, paddingLeft: 8 }}>
+      <strong style={{ color }}>{route?.vehicleIdStr || route?.vehicleId || `Vehicle ${routeIndex + 1}`}</strong>
+      <div>Employees: {employeeList || "—"}</div>
+      <div>Distance: {route?.totalDist?.toFixed(1) ?? route?.totalDistance?.toFixed(1) ?? "—"} km</div>
+      <div>Cost: ₹{route?.totalCost?.toFixed(0) ?? "—"}</div>
+    </div>
+  );
+
   if (isLoading) {
-    // Show straight line while loading
     const straightLine = stops?.map((s) => [s.lat, s.lon]) || [];
     return (
       <Polyline
         positions={straightLine}
         color={color}
-        weight={3}
-        opacity={0.3}
+        weight={weight}
+        opacity={opacity * 0.6}
         dashArray="5, 10"
-      />
+        eventHandlers={{ click: onRouteClick }}
+      >
+        <Tooltip sticky direction="top" className="route-tooltip">{tooltipContent}</Tooltip>
+      </Polyline>
     );
   }
 
@@ -97,14 +117,18 @@ function RealRoutePolyline({ stops, color, routeIndex }) {
     <Polyline
       positions={routeGeometry}
       color={color}
-      weight={4}
-      opacity={0.55}
-    />
+      weight={weight}
+      opacity={opacity}
+      eventHandlers={{ click: onRouteClick }}
+    >
+      <Tooltip sticky direction="top" className="route-tooltip">{tooltipContent}</Tooltip>
+    </Polyline>
   );
 }
 
 export default function RouteMap({ inputData, solution }) {
   const [isDark, setIsDark] = useState(() => document.documentElement.getAttribute("data-theme") !== "light");
+  const [selectedRoute, setSelectedRoute] = useState(null);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -176,9 +200,8 @@ export default function RouteMap({ inputData, solution }) {
         <Info size={18} color="var(--primary)" />
         <div className="help-text">
           <strong>Interactive Route Map</strong>
-          Routes follow actual roads using OpenStreetMap data. Each colored line
-          is a vehicle route with numbered stops showing pickup/drop sequence.
-          Click markers for details.
+          Routes follow actual roads (OSRM). Distance totals match the optimizer's OSRM distance matrix.
+          Click a route line or legend item to highlight it. Click markers for stop details.
         </div>
       </div>
 
@@ -233,25 +256,38 @@ export default function RouteMap({ inputData, solution }) {
                 (r.stops || []).map((s) => s.employeeId).filter(Boolean),
               ).size;
               const routeDistance = (r.totalDist || 0).toFixed(1);
+              const isActive = selectedRoute === i;
               return (
-                <div key={i} className="fleet-item">
+                <div
+                  key={i}
+                  className={`fleet-item ${isActive ? "fleet-item-active" : ""}`}
+                  onClick={() => setSelectedRoute(isActive ? null : i)}
+                  style={{ cursor: "pointer" }}
+                >
                   <div
                     className="fleet-color"
                     style={{
                       background: vehicleColors[i % vehicleColors.length].color,
+                      opacity: selectedRoute != null && !isActive ? 0.35 : 1,
                     }}
                   ></div>
                   <div className="fleet-details">
-                    <div className="fleet-name">
+                    <div className="fleet-name" style={{ color: isActive ? vehicleColors[i % vehicleColors.length].color : undefined }}>
                       {r.vehicleIdStr || r.vehicleId}
                     </div>
                     <div className="fleet-meta">
                       {employeeCount} employees • {routeDistance} km
                     </div>
                   </div>
+                  {isActive && <div className="fleet-active-dot" />}
                 </div>
               );
             })}
+            {selectedRoute != null && (
+              <button className="clear-selection-btn" onClick={() => setSelectedRoute(null)}>
+                Clear selection
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -274,12 +310,18 @@ export default function RouteMap({ inputData, solution }) {
           {/* Render vehicle routes with real road routing */}
           {routes.map((route, rIdx) => {
             const color = vehicleColors[rIdx % vehicleColors.length].color;
+            const isSelected = selectedRoute === rIdx;
+            const isFaded = selectedRoute != null && !isSelected;
             return (
               <React.Fragment key={rIdx}>
                 <RealRoutePolyline
+                  route={route}
                   stops={route.stops}
                   color={color}
                   routeIndex={rIdx}
+                  isSelected={isSelected}
+                  isFaded={isFaded}
+                  onRouteClick={() => setSelectedRoute(isSelected ? null : rIdx)}
                 />
 
                 {/* Route stop markers with sequence numbers */}
@@ -378,6 +420,10 @@ export default function RouteMap({ inputData, solution }) {
         .fleet-status { display: flex; flex-direction: column; gap: 10px; }
         .fleet-item { display: flex; align-items: center; gap: 10px; padding: 8px; background: var(--bg-glass); border-radius: 8px; transition: background 0.2s; }
         .fleet-item:hover { background: var(--border-subtle); }
+        .fleet-item-active { background: var(--border-subtle) !important; border: 1px solid rgba(59,130,246,0.3); }
+        .fleet-active-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+        .clear-selection-btn { width: 100%; margin-top: 8px; padding: 6px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); border-radius: 6px; color: #f87171; font-size: 0.7rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        .clear-selection-btn:hover { background: rgba(239,68,68,0.2); }
         .fleet-color { width: 4px; height: 32px; border-radius: 2px; }
         .fleet-details { flex: 1; }
         .fleet-name { font-size: 0.85rem; font-weight: 600; color: var(--text-bright); }
@@ -411,6 +457,20 @@ export default function RouteMap({ inputData, solution }) {
           box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
         }
         .leaflet-tooltip-top:before { border-top-color: var(--bg-surface) !important; }
+
+        /* Route polyline hover tooltip */
+        .route-tooltip {
+          background: rgba(10, 14, 26, 0.92) !important;
+          border: 1px solid rgba(255,255,255,0.12) !important;
+          border-radius: 8px !important;
+          box-shadow: 0 6px 20px rgba(0,0,0,0.5) !important;
+          padding: 8px 12px !important;
+          font-size: 0.78rem !important;
+          line-height: 1.6 !important;
+          pointer-events: none !important;
+        }
+        .route-tooltip strong { display: block; font-size: 0.85rem; margin-bottom: 2px; }
+        .route-tooltip:before { display: none !important; }
         
         /* Stop marker animations */
         .stop-marker { animation: pulse 2s infinite; }
