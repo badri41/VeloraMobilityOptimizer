@@ -27,14 +27,13 @@
 #include <numeric>
 #include <unordered_set>
 #include <unordered_map>
+#include <chrono>
 
 #include "json.hpp"
 #include "map_distance.hpp"
 
 using json = nlohmann::json;
 using namespace std;
-
-// ============== DATA STRUCTURES ==============
 
 struct Location { 
     double lat, lon; 
@@ -474,37 +473,61 @@ struct InsertionResult {
     Route newRoute;
 };
 
-InsertionResult findBestInsertion(const Route& route, int reqId, const Vehicle& v, 
+InsertionResult findBestInsertion(const Route& route, int reqId, const Vehicle& v,
                                    const vector<Request>& reqs, bool relaxedMode = false) {
     InsertionResult best;
     const Request& req = reqs[reqId];
-    
+
     int n = static_cast<int>(route.stops.size());
-    
-    // Try all valid pickup-dropoff position pairs
-    for (int p = 0; p <= n; ++p) {
+
+    // FIX: Cache oldCost ONCE. Previously this was recomputed inside the inner loop
+    // for every (p,d) pair — O(n²) evaluateRoute calls instead of 1.
+    double oldCost = route.stops.empty() ? 0.0 : evaluateRoute(route, v, reqs).totalCost;
+
+    // FIX: For large routes, subsample pickup positions to avoid O(n²) blowup.
+    // With 50 employees on 2 vehicles each route grows to ~50 stops.
+    // Full search: 50²/2 = 1250 pairs. With MAX_PICKUP_CANDIDATES = 15: 15×50 = 750 pairs.
+    // For routes ≤ FULL_SEARCH_THRESHOLD stops, try every position (exact).
+    // For larger routes, stride-sample pickup positions but still try ALL dropoff positions
+    // for each sampled pickup (preserves dropoff quality).
+    const int FULL_SEARCH_THRESHOLD = 14;  // exact search for small routes
+    const int MAX_PICKUP_CANDIDATES = 16;  // max pickup positions to try for large routes
+
+    vector<int> pickupCandidates;
+    pickupCandidates.reserve(n + 1);
+
+    if (n <= FULL_SEARCH_THRESHOLD) {
+        // Small route: try every position exactly
+        for (int p = 0; p <= n; ++p) pickupCandidates.push_back(p);
+    } else {
+        // Large route: stride-sample, always include first and last
+        int step = max(1, (n + 1) / MAX_PICKUP_CANDIDATES);
+        for (int p = 0; p <= n; p += step) pickupCandidates.push_back(p);
+        if (pickupCandidates.back() != n) pickupCandidates.push_back(n);
+    }
+
+    // Try all valid pickup-dropoff position pairs (sampled pickup, all dropoffs)
+    for (int p : pickupCandidates) {
         for (int d = p + 1; d <= n + 1; ++d) {
             Route trial = route;
-            
+
             // Insert pickup at position p
             Stop pickup{reqId, PICKUP, req.pickup, 0, 0, 0};
             trial.stops.insert(trial.stops.begin() + p, pickup);
-            
-            // Insert dropoff at position d
+
+            // Insert dropoff at position d (index into post-pickup-insertion route)
             Stop dropoff{reqId, DROPOFF, req.dropoff, 0, 0, 0};
             trial.stops.insert(trial.stops.begin() + d, dropoff);
-            
+
             // Check feasibility
             if (!isRouteFeasible(trial, v, reqs, !relaxedMode)) continue;
-            
+
             // Evaluate cost
             auto eval = evaluateRoute(trial, v, reqs);
             if (!eval.feasible) continue;
-            
-            // Calculate cost increase
-            double oldCost = route.stops.empty() ? 0 : evaluateRoute(route, v, reqs).totalCost;
-            double costInc = eval.totalCost - oldCost;
-            
+
+            double costInc = eval.totalCost - oldCost;  // uses cached oldCost
+
             if (costInc < best.costIncrease) {
                 best.feasible = true;
                 best.pickupPos = p;
@@ -514,7 +537,7 @@ InsertionResult findBestInsertion(const Route& route, int reqId, const Vehicle& 
             }
         }
     }
-    
+
     return best;
 }
 
@@ -642,8 +665,7 @@ Solution relocateMove(const Solution& current, const vector<Request>& reqs,
 }
 
 // Exchange: Swap requests between two routes
-Solution exchangeMove(const Solution& current, const vector<Request>& reqs,
-                      const vector<Vehicle>& vehicles, mt19937& gen) {
+Solution exchangeMove(const Solution& current, const vector<Request>& reqs, const vector<Vehicle>& vehicles, mt19937& gen) {
     Solution neighbor = current;
     
     vector<int> nonEmptyRoutes;
@@ -720,57 +742,97 @@ Solution twoOptMove(const Solution& current, const vector<Request>& reqs,
 
 // ============== SIMULATED ANNEALING ==============
 
+using Clock = chrono::steady_clock;
+
 Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs,
-                            const vector<Vehicle>& vehicles, mt19937& gen) {
-    
+                            const vector<Vehicle>& vehicles, mt19937& gen,
+                            Clock::time_point deadline) {
+
     Solution current = initial;
     Solution best = initial;
-    
-    // SA parameters
-    double T = 1000.0;
+
+    // ── Scale SA parameters based on problem complexity ──────────────────────
+    // "avgRouteStops" captures how large and expensive each move is.
+    // For 50 emps / 2 vehicles: avgRouteStops ≈ 50 → very expensive per move.
+    // For 10 emps / 5 vehicles: avgRouteStops ≈  4 → cheap, allow more iters.
+    int nonEmptyCount = 0;
+    int totalStops = 0;
+    for (const auto& r : initial.routes) {
+        if (!r.stops.empty()) {
+            ++nonEmptyCount;
+            totalStops += static_cast<int>(r.stops.size());
+        }
+    }
+    int avgRouteStops = (nonEmptyCount > 0) ? (totalStops / nonEmptyCount) : 1;
+
+    // Scale down iterations for large routes (expensive moves):
+    //   avgRouteStops =  4 → scale=1  → maxIterPerTemp=100, maxNoImprove=2000
+    //   avgRouteStops = 20 → scale=5  → maxIterPerTemp= 20, maxNoImprove= 400
+    //   avgRouteStops = 50 → scale=12 → maxIterPerTemp=  8, maxNoImprove= 166
+    //   avgRouteStops =100 → scale=25 → maxIterPerTemp=  4, maxNoImprove=  80
+    int scale = max(1, avgRouteStops / 4);
+    int maxIterPerTemp = max(4,  100 / scale);
+    int maxNoImprove   = max(60, 2000 / scale);
+
+    // Cooling: faster for complex problems (fewer temp steps needed given fewer iters)
+    double alpha = (avgRouteStops > 30) ? 0.990 : 0.995;
+
+    double T    = 1000.0;
     double Tmin = 0.1;
-    double alpha = 0.995;
-    int maxIterPerTemp = 100;
-    int maxNoImprove = 2000;
-    
+
+    // Whether exchange is even possible (needs ≥2 non-empty routes)
+    bool canExchange = (nonEmptyCount >= 2);
+
     int noImproveCount = 0;
     int iteration = 0;
-    
+
     while (T > Tmin && noImproveCount < maxNoImprove) {
+        // ── Wall-clock time limit — prevents runaway on any input ──────────
+        if (Clock::now() >= deadline) {
+            cout << "SA time limit reached at iteration " << iteration << endl;
+            break;
+        }
+
         for (int iter = 0; iter < maxIterPerTemp; ++iter) {
             ++iteration;
-            
-            // Choose random move
-            uniform_int_distribution<> moveDist(0, 2);
+
+            // Choose move: skip exchangeMove when only 1 route is populated
+            // (it always returns current unchanged, burning iteration budget).
             Solution neighbor;
-            
-            switch (moveDist(gen)) {
-                case 0: neighbor = relocateMove(current, reqs, vehicles, gen); break;
-                case 1: neighbor = exchangeMove(current, reqs, vehicles, gen); break;
-                case 2: neighbor = twoOptMove(current, reqs, vehicles, gen); break;
+            if (canExchange) {
+                uniform_int_distribution<> moveDist(0, 2);
+                switch (moveDist(gen)) {
+                    case 0: neighbor = relocateMove(current, reqs, vehicles, gen); break;
+                    case 1: neighbor = exchangeMove(current, reqs, vehicles, gen); break;
+                    case 2: neighbor = twoOptMove(current, reqs, vehicles, gen);   break;
+                }
+            } else {
+                // Only 1 non-empty route: relocate (reinsertion) + 2-opt
+                uniform_int_distribution<> moveDist(0, 1);
+                switch (moveDist(gen)) {
+                    case 0: neighbor = relocateMove(current, reqs, vehicles, gen); break;
+                    case 1: neighbor = twoOptMove(current, reqs, vehicles, gen);   break;
+                }
             }
-            
-            // Skip if move failed
-            if (abs(neighbor.globalCost - current.globalCost) < 1e-9 && 
+
+            // Skip if move made no change
+            if (abs(neighbor.globalCost - current.globalCost) < 1e-9 &&
                 neighbor.unassignedReqs.size() == current.unassignedReqs.size()) {
                 continue;
             }
-            
+
             double delta = neighbor.globalCost - current.globalCost;
-            
+
             bool accept = false;
             if (delta < 0) {
                 accept = true;
             } else {
                 uniform_real_distribution<> prob(0.0, 1.0);
-                if (prob(gen) < exp(-delta / T)) {
-                    accept = true;
-                }
+                if (prob(gen) < exp(-delta / T)) accept = true;
             }
-            
+
             if (accept) {
                 current = std::move(neighbor);
-                
                 if (current.globalCost < best.globalCost) {
                     best = current;
                     noImproveCount = 0;
@@ -781,11 +843,13 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
                 ++noImproveCount;
             }
         }
-        
+
         T *= alpha;
     }
-    
-    cout << "SA completed: " << iteration << " iterations, final temp: " << T << endl;
+
+    cout << "SA completed: " << iteration << " iters, avgRouteStops=" << avgRouteStops
+         << ", maxIterPerTemp=" << maxIterPerTemp << ", maxNoImprove=" << maxNoImprove
+         << ", finalT=" << fixed << setprecision(3) << T << endl;
     return best;
 }
 
@@ -933,32 +997,57 @@ int main(int argc, char** argv) {
     cout << "Input: " << requests.size() << " requests, " << vehicles.size() << " vehicles" << endl;
     cout << "Weights: cost=" << gCtx.wCost << ", time=" << gCtx.wTime << endl;
 
+    // ── Global wall-clock deadline ──────────────────────────────────────────
+    // Backend kills the subprocess at 28s; we stop voluntarily at 24s to leave
+    // time for JSON serialisation and process teardown.
+    auto solverStart = Clock::now();
+    auto deadline    = solverStart + chrono::seconds(24);
+
     // Pre-compute NxN distance matrix (1 API call instead of thousands)
     if (allowExternal && mapProvider != MapProvider::HAVERSINE) {
         cout << "\nPre-computing distance matrix via Table API..." << endl;
         gDistMatrix.build(vehicles, requests, mapDist);
     }
 
-    // Multiple restarts for better solution
-    cout << "\nPhase 1: Constructive Heuristic (multi-start)..." << endl;
+    // ── Scale construction restarts based on problem complexity ─────────────
+    // avg stops per vehicle ≈ (requests × 2) / vehicles.
+    // Large values mean each findBestInsertion call is expensive; reduce restarts.
+    //   avg =  4 → 10 restarts   avg = 25 → 4 restarts   avg = 50+ → 2 restarts
+    int avgStopsPerVeh = (vehicles.empty()) ? 1
+        : max(1, static_cast<int>(requests.size()) * 2 / static_cast<int>(vehicles.size()));
+    int numRestarts = max(1, min(10, 50 / avgStopsPerVeh));
+
+    cout << "\nPhase 1: Constructive Heuristic (" << numRestarts << " restarts, "
+         << "avgStopsPerVeh=" << avgStopsPerVeh << ")..." << endl;
+
     mt19937 gen(42);
     Solution bestInit;
     bestInit.globalCost = numeric_limits<double>::max();
-    
-    for (int restart = 0; restart < 10; ++restart) {
+
+    for (int restart = 0; restart < numRestarts; ++restart) {
+        // Abort construction early if we're already near the deadline
+        if (Clock::now() >= deadline - chrono::seconds(4)) {
+            cout << "Construction time budget exhausted at restart " << restart << endl;
+            break;
+        }
         Solution init = constructInitialSolution(requests, vehicles, gen);
         if (init.globalCost < bestInit.globalCost) {
             bestInit = std::move(init);
         }
     }
-    
-    cout << "Initial solution: cost=" << fixed << setprecision(2) << bestInit.totalMoneyCost 
-         << ", penalty=" << bestInit.totalPenaltyCost 
+
+    // Safety: if all restarts were skipped (extremely unlikely), build one solution
+    if (bestInit.globalCost >= numeric_limits<double>::max()) {
+        bestInit = constructInitialSolution(requests, vehicles, gen);
+    }
+
+    cout << "Initial solution: cost=" << fixed << setprecision(2) << bestInit.totalMoneyCost
+         << ", penalty=" << bestInit.totalPenaltyCost
          << ", unassigned=" << bestInit.unassignedReqs.size() << endl;
-    
+
     // Improve with SA
     cout << "\nPhase 2: Simulated Annealing optimization..." << endl;
-    Solution finalSol = simulatedAnnealing(bestInit, requests, vehicles, gen);
+    Solution finalSol = simulatedAnnealing(bestInit, requests, vehicles, gen, deadline);
     
     cout << "\nFinal solution: cost=" << fixed << setprecision(2) << finalSol.totalMoneyCost 
          << ", penalty=" << finalSol.totalPenaltyCost 
