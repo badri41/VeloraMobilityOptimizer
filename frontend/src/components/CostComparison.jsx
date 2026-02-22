@@ -21,11 +21,14 @@ export default function CostComparison({ solution, inputData }) {
 
   const totalPenaltyCost = data.summary?.totalPenaltyCost || 0;
   const constraints = data.constraintAnalysis || [];
-  const unassignedCount = constraints.filter((c) => c.overallStatus === "unassigned").length;
-  const violatedCount = constraints.filter((c) => c.overallStatus === "violated").length;
-  const vehPrefViolations = constraints.filter((c) => c.vehiclePrefViolated).length;
-  const sharingViolations = constraints.filter((c) => c.sharingViolated).length;
-  const withinTolCount = constraints.filter((c) => c.overallStatus === "within_tolerance").length;
+  const unassignedConstraints = constraints.filter((c) => c.overallStatus === "unassigned");
+  const violatedConstraints = constraints.filter((c) => c.overallStatus === "violated");
+  const vehPrefConstraints = constraints.filter((c) => c.vehiclePrefViolated);
+  const sharingConstraints = constraints.filter((c) => c.sharingViolated);
+  const unassignedCount = unassignedConstraints.length;
+  const violatedCount = violatedConstraints.length;
+  const vehPrefViolations = vehPrefConstraints.length;
+  const sharingViolations = sharingConstraints.length;
 
   // Use solver-reported penalty weights if available, otherwise fall back to defaults
   const solverWeights = data.summary?.penaltyWeightsUsed || {};
@@ -40,12 +43,26 @@ export default function CostComparison({ solution, inputData }) {
   const VEH_PREF_PENALTY = solverWeights.vehiclePrefViolationPenalty ?? 300;
   const LATE_PER_MIN = solverWeights.lateArrivalPenaltyPerMin ?? 10;
 
+  // Exact per-employee violation penalty using the solver's formula:
+  //   excessMinutes × (maxDelayViolationPenalty / 100) × priorityWeight
+  //   where priorityWeight = (6 - priority) × 10  (P1→50, P2→40, P3→30, P4→20, P5→10)
+  const getPriorityWeight = (p) => (6 - Math.max(1, Math.min(5, p))) * 10;
+  const violatedDetails = violatedConstraints.map((c) => {
+    const toleranceDeadline = (c.lateTime ?? 0) + (c.maxDelay ?? 0);
+    const excessMinutes = Math.max(0, (c.dropoffArrival ?? 0) - toleranceDeadline);
+    const rate = LATE_VIOLATION_PENALTY / 100;
+    const pw = getPriorityWeight(c.priority ?? 3);
+    const amount = excessMinutes * rate * pw;
+    return { employeeId: c.employeeId, excessMinutes, rate, pw, amount, priority: c.priority };
+  });
+  const violatedSubtotal = violatedDetails.reduce((s, d) => s + d.amount, 0);
+
   const penaltyBreakdown = [
     { label: "Unassigned employees", count: unassignedCount, weight: UNASSIGNED_PENALTY, subtotal: unassignedCount * UNASSIGNED_PENALTY, color: "#ef4444" },
-    { label: "Hard time window violations", count: violatedCount, rateFormula: `excess minutes × (₹${LATE_VIOLATION_PENALTY.toLocaleString()}/100) × priority`, color: "#f87171", variable: true },
-    { label: "Sharing limit violations", count: sharingViolations, weight: SHARING_PENALTY, subtotal: sharingViolations * SHARING_PENALTY, color: "#f97316", note: "per-event basis; approximate" },
+    violatedCount > 0 && { label: "Hard time window violations", count: violatedCount, subtotal: violatedSubtotal, color: "#f87171", details: violatedDetails },
+    { label: "Sharing limit violations", count: sharingViolations, weight: SHARING_PENALTY, subtotal: sharingViolations * SHARING_PENALTY, color: "#f97316", note: "≈ per-event; may differ from solver" },
     { label: "Vehicle pref. violations", count: vehPrefViolations, weight: VEH_PREF_PENALTY, subtotal: vehPrefViolations * VEH_PREF_PENALTY, color: "#a855f7" },
-  ].filter((p) => p.count > 0);
+  ].filter(Boolean).filter((p) => p.count > 0);
 
   return (
     <div className="cost-comparison-v2">
@@ -132,22 +149,40 @@ export default function CostComparison({ solution, inputData }) {
                   <>
                     <div className="penalty-items">
                       {penaltyBreakdown.map((p, i) => (
-                        <div key={i} className="penalty-item">
-                          <div className="penalty-item-left">
-                            <span className="penalty-dot" style={{ background: p.color }} />
-                            <span className="penalty-item-label">{p.label}</span>
-                            <span className="penalty-item-count">×{p.count}</span>
+                        <div key={i} className="penalty-item-block">
+                          <div className="penalty-item">
+                            <div className="penalty-item-left">
+                              <span className="penalty-dot" style={{ background: p.color }} />
+                              <span className="penalty-item-label">{p.label}</span>
+                              <span className="penalty-item-count">×{p.count}</span>
+                            </div>
+                            <div className="penalty-item-right">
+                              {p.details ? (
+                                <span className="penalty-subtotal" style={{ color: p.color }}>≈ ₹{p.subtotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              ) : (
+                                <>
+                                  <span className="penalty-weight">@ ₹{p.weight.toLocaleString()}{p.note ? ` (${p.note})` : ""}</span>
+                                  <span className="penalty-subtotal" style={{ color: p.color }}>₹{p.subtotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div className="penalty-item-right">
-                            {p.variable ? (
-                              <span className="penalty-weight" style={{ fontStyle: "italic" }}>variable: {p.rateFormula}</span>
-                            ) : (
-                              <>
-                                <span className="penalty-weight">@ ₹{p.weight.toLocaleString()}{p.note ? ` (${p.note})` : ""}</span>
-                                <span className="penalty-subtotal" style={{ color: p.color }}>₹{p.subtotal.toLocaleString()}</span>
-                              </>
-                            )}
-                          </div>
+                          {p.details && p.details.length > 0 && (
+                            <div className="penalty-detail-rows">
+                              {p.details.map((d, di) => (
+                                <div key={di} className="penalty-detail-row">
+                                  <span className="pdr-emp">{d.employeeId}</span>
+                                  <span className="pdr-formula">
+                                    {d.excessMinutes.toFixed(1)} min × ₹{d.rate.toLocaleString()}/min × P{d.priority}(×{d.pw})
+                                  </span>
+                                  <span className="pdr-amount" style={{ color: p.color }}>
+                                    ₹{d.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                  </span>
+                                </div>
+                              ))}
+                              <div className="pdr-note">Formula: excess min × (maxDelay÷100) × priorityWeight — computed from solver's stop arrival times</div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -225,7 +260,14 @@ export default function CostComparison({ solution, inputData }) {
         .penalty-explanation { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; }
         .penalty-all-clear { font-size: 0.78rem; color: #10b981; font-weight: 600; }
         .penalty-items { display: flex; flex-direction: column; gap: 8px; }
+        .penalty-item-block { display: flex; flex-direction: column; gap: 4px; }
         .penalty-item { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 10px; background: rgba(0,0,0,0.15); border-radius: 8px; }
+        .penalty-detail-rows { padding: 6px 10px 8px 22px; background: rgba(0,0,0,0.1); border-radius: 0 0 8px 8px; border: 1px solid rgba(255,255,255,0.04); border-top: none; display: flex; flex-direction: column; gap: 4px; }
+        .penalty-detail-row { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; }
+        .pdr-emp { font-weight: 700; color: var(--text-bright); min-width: 64px; }
+        .pdr-formula { flex: 1; color: var(--text-dim); font-family: monospace; }
+        .pdr-amount { font-family: var(--font-display); font-weight: 700; font-size: 0.8rem; }
+        .pdr-note { font-size: 0.66rem; color: var(--text-faded); font-style: italic; margin-top: 4px; }
         .penalty-item-left { display: flex; align-items: center; gap: 8px; }
         .penalty-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
         .penalty-item-label { font-size: 0.78rem; color: var(--text-bright); }

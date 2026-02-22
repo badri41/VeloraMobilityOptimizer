@@ -2,11 +2,11 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronUp, Settings2, RotateCcw } from "lucide-react";
 
 export const DEFAULT_PENALTY_WEIGHTS = {
-  lateArrivalPenaltyPerMin: 10,
-  sharingViolationPenalty: 500,
-  vehiclePrefViolationPenalty: 300,
+  lateArrivalPenaltyPerMin: 0,
+  sharingViolationPenalty: 0,
+  vehiclePrefViolationPenalty: 0,
   unassignedPenalty: 50000,
-  maxDelayViolationPenalty: 100000,
+  maxDelayViolationPenalty: 0,
 };
 
 const PENALTY_FIELDS = [
@@ -110,7 +110,7 @@ export default function PenaltyForm({ weights, onChange }) {
                     }}
                     className="pf-input"
                   />
-                  {weights[key] !== DEFAULT_PENALTY_WEIGHTS[key] && (
+                  {weights[key] !== DEFAULT_PENALTY_WEIGHTS[key] && DEFAULT_PENALTY_WEIGHTS[key] > 0 && (
                     <span className="pf-default-note">default: ₹{DEFAULT_PENALTY_WEIGHTS[key].toLocaleString()}</span>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -69,13 +69,11 @@ function RealRoutePolyline({ route, stops, color, routeIndex, isHighlighted, isF
         setIsLoading(false);
         return;
       }
-
       const coordinates = stops.map((s) => [s.lat, s.lon]);
       const geometry = await fetchRoute(coordinates);
       setRouteGeometry(geometry);
       setIsLoading(false);
     }
-
     loadRoute();
   }, [stops]);
 
@@ -97,6 +95,23 @@ function RealRoutePolyline({ route, stops, color, routeIndex, isHighlighted, isF
     </div>
   );
 
+  // Stable event handler object — uses refs internally to avoid stale closures
+  // without recreating the object on every render (which causes Leaflet to
+  // remove+re-add listeners and can fire spurious mouseout events mid-render)
+  const onRouteHoverRef = useRef(onRouteHover);
+  const onRouteHoverEndRef = useRef(onRouteHoverEnd);
+  const onRouteClickRef = useRef(onRouteClick);
+  useEffect(() => { onRouteHoverRef.current = onRouteHover; }, [onRouteHover]);
+  useEffect(() => { onRouteHoverEndRef.current = onRouteHoverEnd; }, [onRouteHoverEnd]);
+  useEffect(() => { onRouteClickRef.current = onRouteClick; }, [onRouteClick]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const eventHandlers = useRef({
+    click: () => onRouteClickRef.current(),
+    mouseover: () => onRouteHoverRef.current(routeIndex),
+    mouseout: () => onRouteHoverEndRef.current(),
+  }).current;
+
   if (isLoading) {
     const straightLine = stops?.map((s) => [s.lat, s.lon]) || [];
     return (
@@ -106,11 +121,7 @@ function RealRoutePolyline({ route, stops, color, routeIndex, isHighlighted, isF
         weight={weight}
         opacity={opacity * 0.6}
         dashArray="5, 10"
-        eventHandlers={{
-          click: onRouteClick,
-          mouseover: () => onRouteHover(routeIndex),
-          mouseout: () => onRouteHoverEnd(),
-        }}
+        eventHandlers={eventHandlers}
       >
         <Tooltip sticky direction="top" className="route-tooltip">{tooltipContent}</Tooltip>
       </Polyline>
@@ -123,11 +134,7 @@ function RealRoutePolyline({ route, stops, color, routeIndex, isHighlighted, isF
       color={color}
       weight={weight}
       opacity={opacity}
-      eventHandlers={{
-        click: onRouteClick,
-        mouseover: () => onRouteHover(routeIndex),
-        mouseout: () => onRouteHoverEnd(),
-      }}
+      eventHandlers={eventHandlers}
     >
       <Tooltip sticky direction="top" className="route-tooltip">{tooltipContent}</Tooltip>
     </Polyline>
@@ -138,6 +145,7 @@ export default function RouteMap({ inputData, solution, hoveredEmployeeId }) {
   const [isDark, setIsDark] = useState(() => document.documentElement.getAttribute("data-theme") !== "light");
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [hoveredRoute, setHoveredRoute] = useState(null);
+  const hoverEndTimer = useRef(null);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -176,6 +184,22 @@ export default function RouteMap({ inputData, solution, hoveredEmployeeId }) {
     const mins = Math.floor(minutes % 60);
     return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`;
   };
+
+  // Stable hover callbacks — debounce the end to prevent flicker from re-renders
+  const handleRouteHover = useCallback((idx) => {
+    if (hoverEndTimer.current) {
+      clearTimeout(hoverEndTimer.current);
+      hoverEndTimer.current = null;
+    }
+    setHoveredRoute(idx);
+  }, []);
+
+  const handleRouteHoverEnd = useCallback(() => {
+    hoverEndTimer.current = setTimeout(() => {
+      setHoveredRoute(null);
+      hoverEndTimer.current = null;
+    }, 80);
+  }, []);
 
   const routes = solution?.data?.routes || [];
 
@@ -348,8 +372,8 @@ export default function RouteMap({ inputData, solution, hoveredEmployeeId }) {
                   isHighlighted={isHighlighted}
                   isFaded={isFaded}
                   onRouteClick={() => setSelectedRoute(selectedRoute === rIdx ? null : rIdx)}
-                  onRouteHover={(idx) => setHoveredRoute(idx)}
-                  onRouteHoverEnd={() => setHoveredRoute(null)}
+                  onRouteHover={handleRouteHover}
+                  onRouteHoverEnd={handleRouteHoverEnd}
                 />
 
                 {/* Route stop markers with sequence numbers */}
