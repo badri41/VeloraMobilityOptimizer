@@ -28,6 +28,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <chrono>
+#include <sstream>
 
 #include "json.hpp"
 #include "map_distance.hpp"
@@ -740,13 +741,101 @@ Solution twoOptMove(const Solution& current, const vector<Request>& reqs,
     return current;
 }
 
+// Greedy Relocate: Move a request to its BEST route (tries all vehicles)
+// Uses exact same building blocks as relocateMove — no new constraint logic.
+Solution greedyRelocateMove(const Solution& current, const vector<Request>& reqs,
+                            const vector<Vehicle>& vehicles, mt19937& gen) {
+    Solution neighbor = current;
+
+    vector<int> nonEmptyRoutes;
+    for (size_t i = 0; i < neighbor.routes.size(); ++i) {
+        if (!neighbor.routes[i].stops.empty()) nonEmptyRoutes.push_back(static_cast<int>(i));
+    }
+    if (nonEmptyRoutes.empty()) return current;
+
+    uniform_int_distribution<> routeDist(0, static_cast<int>(nonEmptyRoutes.size()) - 1);
+    int srcRouteIdx = nonEmptyRoutes[routeDist(gen)];
+
+    auto reqIds = getRequestsInRoute(neighbor.routes[srcRouteIdx]);
+    if (reqIds.empty()) return current;
+
+    uniform_int_distribution<> reqDist(0, static_cast<int>(reqIds.size()) - 1);
+    int reqId = reqIds[reqDist(gen)];
+
+    // Remove from source
+    removeRequestFromRoute(neighbor.routes[srcRouteIdx], reqId);
+
+    // Try ALL routes, pick the cheapest feasible insertion
+    double bestCost = numeric_limits<double>::max();
+    int bestRoute = -1;
+    Route bestNewRoute;
+
+    for (size_t v = 0; v < vehicles.size(); ++v) {
+        auto ins = findBestInsertion(neighbor.routes[v], reqId, vehicles[v], reqs, true);
+        if (ins.feasible && ins.costIncrease < bestCost) {
+            bestCost = ins.costIncrease;
+            bestRoute = static_cast<int>(v);
+            bestNewRoute = std::move(ins.newRoute);
+        }
+    }
+
+    if (bestRoute >= 0) {
+        neighbor.routes[bestRoute] = std::move(bestNewRoute);
+        evaluateSolution(neighbor, vehicles, reqs);
+        return neighbor;
+    }
+
+    return current;
+}
+
+// Intra-route Relocate: Remove a request from its route and re-insert at the
+// best position *within the same route* (Or-opt style).
+// Explores positions the construction heuristic couldn't reach.
+// Reuses removeRequestFromRoute + findBestInsertion — no new constraint logic.
+Solution intraRouteRelocateMove(const Solution& current, const vector<Request>& reqs,
+                                const vector<Vehicle>& vehicles, mt19937& gen) {
+    Solution neighbor = current;
+
+    // Need routes with ≥ 2 requests (4 stops) so removal still leaves a route to insert into
+    vector<int> eligibleRoutes;
+    for (size_t i = 0; i < neighbor.routes.size(); ++i) {
+        if (neighbor.routes[i].stops.size() >= 4)
+            eligibleRoutes.push_back(static_cast<int>(i));
+    }
+    if (eligibleRoutes.empty()) return current;
+
+    uniform_int_distribution<> routeDist(0, static_cast<int>(eligibleRoutes.size()) - 1);
+    int routeIdx = eligibleRoutes[routeDist(gen)];
+
+    auto reqIds = getRequestsInRoute(neighbor.routes[routeIdx]);
+    if (reqIds.size() < 2) return current;
+
+    uniform_int_distribution<> reqDist(0, static_cast<int>(reqIds.size()) - 1);
+    int reqId = reqIds[reqDist(gen)];
+
+    // Remove from route
+    removeRequestFromRoute(neighbor.routes[routeIdx], reqId);
+
+    // Re-insert at best position in the SAME route
+    auto ins = findBestInsertion(neighbor.routes[routeIdx], reqId, vehicles[routeIdx], reqs, true);
+
+    if (ins.feasible) {
+        neighbor.routes[routeIdx] = std::move(ins.newRoute);
+        evaluateSolution(neighbor, vehicles, reqs);
+        return neighbor;
+    }
+
+    return current;
+}
+
 // ============== SIMULATED ANNEALING ==============
 
 using Clock = chrono::steady_clock;
 
 Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs,
                             const vector<Vehicle>& vehicles, mt19937& gen,
-                            Clock::time_point deadline) {
+                            Clock::time_point deadline,
+                            ostream* convergenceLog = nullptr) {
 
     Solution current = initial;
     Solution best = initial;
@@ -766,22 +855,40 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
     int avgRouteStops = (nonEmptyCount > 0) ? (totalStops / nonEmptyCount) : 1;
 
     // Scale down iterations for large routes (expensive moves):
-    //   avgRouteStops =  4 → scale=1  → maxIterPerTemp=100, maxNoImprove=2000
-    //   avgRouteStops = 20 → scale=5  → maxIterPerTemp= 20, maxNoImprove= 400
-    //   avgRouteStops = 50 → scale=12 → maxIterPerTemp=  8, maxNoImprove= 166
-    //   avgRouteStops =100 → scale=25 → maxIterPerTemp=  4, maxNoImprove=  80
+    //   avgRouteStops =  4 → scale=1  → maxIterPerTemp=80, maxNoImprove=1500
+    //   avgRouteStops = 20 → scale=5  → maxIterPerTemp=16, maxNoImprove= 300
+    //   avgRouteStops = 50 → scale=12 → maxIterPerTemp= 6, maxNoImprove= 125
     int scale = max(1, avgRouteStops / 4);
-    int maxIterPerTemp = max(4,  100 / scale);
-    int maxNoImprove   = max(60, 2000 / scale);
+    int maxIterPerTemp = max(5,  80 / scale);
+    int maxNoImprove   = max(80, 1500 / scale);
 
-    // Cooling: faster for complex problems (fewer temp steps needed given fewer iters)
-    double alpha = (avgRouteStops > 30) ? 0.990 : 0.995;
+    // ── Calibrated initial temperature ──────────────────────────────────────
+    // T₀ proportional to initial cost prevents wild acceptance of terrible moves.
+    // T₀ = 1000 with globalCost ≈ 700 means exp(-500/1000) = 60% acceptance of +500 moves (too hot).
+    // T₀ = 0.3 * globalCost → exp(-500/210) = 9% acceptance (controlled exploration).
+    // Cap at 1000: penalty-heavy instances (globalCost 3M+) must not get absurd T.
+    double T    = max(100.0, min(initial.globalCost * 0.3, 1000.0));
+    double Tmin = 1.0;
 
-    double T    = 1000.0;
-    double Tmin = 0.1;
+    // Faster cooling: α = 0.99 drives exploitation sooner (was 0.995).
+    // For very complex routes, cool even faster to stay within time budget.
+    double alpha = (avgRouteStops > 30) ? 0.985 : 0.99;
 
     // Whether exchange is even possible (needs ≥2 non-empty routes)
     bool canExchange = (nonEmptyCount >= 2);
+
+    // ── Operator probability weights ────────────────────────────────────────
+    // Emphasise greedyRelocate + intraRouteRelocate (richer neighborhoods).
+    //   relocate:10  greedyRelocate:25  exchange:15  intraRoute:30  twoOpt:20
+    // When only 1 non-empty route, drop exchange:
+    //   relocate:10  greedyRelocate:25  intraRoute:35  twoOpt:30
+    vector<double> opWeights;
+    if (canExchange) {
+        opWeights = {10, 25, 15, 30, 20};  // 5 operators
+    } else {
+        opWeights = {10, 25, 35, 30};       // 4 operators (no exchange)
+    }
+    discrete_distribution<> opDist(opWeights.begin(), opWeights.end());
 
     int noImproveCount = 0;
     int iteration = 0;
@@ -796,28 +903,36 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
         for (int iter = 0; iter < maxIterPerTemp; ++iter) {
             ++iteration;
 
-            // Choose move: skip exchangeMove when only 1 route is populated
-            // (it always returns current unchanged, burning iteration budget).
+            // Choose move via weighted distribution.
+            // Operator mapping:
+            //   canExchange:   0=relocate 1=greedyRelocate 2=exchange 3=intraRouteRelocate 4=twoOpt
+            //   !canExchange:  0=relocate 1=greedyRelocate 2=intraRouteRelocate 3=twoOpt
             Solution neighbor;
+            int op = opDist(gen);
             if (canExchange) {
-                uniform_int_distribution<> moveDist(0, 2);
-                switch (moveDist(gen)) {
-                    case 0: neighbor = relocateMove(current, reqs, vehicles, gen); break;
-                    case 1: neighbor = exchangeMove(current, reqs, vehicles, gen); break;
-                    case 2: neighbor = twoOptMove(current, reqs, vehicles, gen);   break;
+                switch (op) {
+                    case 0: neighbor = relocateMove(current, reqs, vehicles, gen);        break;
+                    case 1: neighbor = greedyRelocateMove(current, reqs, vehicles, gen);  break;
+                    case 2: neighbor = exchangeMove(current, reqs, vehicles, gen);        break;
+                    case 3: neighbor = intraRouteRelocateMove(current, reqs, vehicles, gen); break;
+                    default: neighbor = twoOptMove(current, reqs, vehicles, gen);         break;
                 }
             } else {
-                // Only 1 non-empty route: relocate (reinsertion) + 2-opt
-                uniform_int_distribution<> moveDist(0, 1);
-                switch (moveDist(gen)) {
-                    case 0: neighbor = relocateMove(current, reqs, vehicles, gen); break;
-                    case 1: neighbor = twoOptMove(current, reqs, vehicles, gen);   break;
+                switch (op) {
+                    case 0: neighbor = relocateMove(current, reqs, vehicles, gen);        break;
+                    case 1: neighbor = greedyRelocateMove(current, reqs, vehicles, gen);  break;
+                    case 2: neighbor = intraRouteRelocateMove(current, reqs, vehicles, gen); break;
+                    default: neighbor = twoOptMove(current, reqs, vehicles, gen);         break;
                 }
             }
 
             // Skip if move made no change
             if (abs(neighbor.globalCost - current.globalCost) < 1e-9 &&
                 neighbor.unassignedReqs.size() == current.unassignedReqs.size()) {
+                if (convergenceLog) {
+                    (*convergenceLog) << iteration << ',' << current.globalCost << ','
+                                     << best.globalCost << ',' << T << '\n';
+                }
                 continue;
             }
 
@@ -842,6 +957,11 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
             } else {
                 ++noImproveCount;
             }
+
+            if (convergenceLog) {
+                (*convergenceLog) << iteration << ',' << current.globalCost << ','
+                                 << best.globalCost << ',' << T << '\n';
+            }
         }
 
         T *= alpha;
@@ -849,7 +969,9 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
 
     cout << "SA completed: " << iteration << " iters, avgRouteStops=" << avgRouteStops
          << ", maxIterPerTemp=" << maxIterPerTemp << ", maxNoImprove=" << maxNoImprove
-         << ", finalT=" << fixed << setprecision(3) << T << endl;
+         << ", T0=" << fixed << setprecision(1) << max(100.0, min(initial.globalCost * 0.3, 1000.0))
+         << ", alpha=" << setprecision(3) << alpha
+         << ", finalT=" << setprecision(3) << T << endl;
     return best;
 }
 
@@ -858,6 +980,13 @@ Solution simulatedAnnealing(const Solution& initial, const vector<Request>& reqs
 int main(int argc, char** argv) {
     string inputPath = (argc > 1) ? argv[1] : "input.json";
     string outputPath = (argc > 2) ? argv[2] : "solution.json";
+    string convergenceCsvPath = (argc > 3) ? argv[3] : "";
+
+    if (convergenceCsvPath.empty()) {
+        size_t dot = outputPath.find_last_of('.');
+        string base = (dot == string::npos) ? outputPath : outputPath.substr(0, dot);
+        convergenceCsvPath = base + "_convergence.csv";
+    }
     
     // Read input
     ifstream in(inputPath);
@@ -1047,7 +1176,20 @@ int main(int argc, char** argv) {
 
     // Improve with SA
     cout << "\nPhase 2: Simulated Annealing optimization..." << endl;
-    Solution finalSol = simulatedAnnealing(bestInit, requests, vehicles, gen, deadline);
+    ofstream convergenceOut(convergenceCsvPath);
+    if (!convergenceOut.is_open()) {
+        cerr << "Warning: could not open convergence CSV for writing: " << convergenceCsvPath << endl;
+    } else {
+        convergenceOut << "iteration,current_cost,best_cost,temperature\n";
+    }
+
+    Solution finalSol = simulatedAnnealing(bestInit, requests, vehicles, gen, deadline,
+                                           convergenceOut.is_open() ? &convergenceOut : nullptr);
+
+    if (convergenceOut.is_open()) {
+        convergenceOut.close();
+        cout << "Convergence CSV written to: " << convergenceCsvPath << endl;
+    }
     
     cout << "\nFinal solution: cost=" << fixed << setprecision(2) << finalSol.totalMoneyCost 
          << ", penalty=" << finalSol.totalPenaltyCost 
