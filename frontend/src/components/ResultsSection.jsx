@@ -101,28 +101,37 @@ export default function ResultsSection({ solution, inputData, hoveredEmployeeId,
       </nav>
 
       <div className="results-content-v2">
+        {/* RouteMap is always mounted to prevent Leaflet remount glitches; hidden via CSS when inactive */}
+        <div style={{ display: activeTab === "visualization" ? "block" : "none" }}>
+          <RouteMap
+            inputData={inputData}
+            solution={solution}
+            hoveredEmployeeId={hoveredEmployeeId}
+            isActive={activeTab === "visualization"}
+          />
+        </div>
+
         <AnimatePresence mode="sync">
-          <motion.div
-            key={activeTab}
-            className="tab-panel-v2"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            {activeTab === "visualization" && (
-              <RouteMap inputData={inputData} solution={solution} hoveredEmployeeId={hoveredEmployeeId} />
-            )}
-            {activeTab === "costs" && (
-              <CostComparison solution={solution} inputData={inputData} />
-            )}
-            {activeTab === "employees" && (
-              <EmployeeResults solution={solution} inputData={inputData} onEmployeeHover={onEmployeeHover} />
-            )}
-            {activeTab === "details" && (
-              <ResultsPanel solution={solution} inputData={inputData} />
-            )}
-          </motion.div>
+          {activeTab !== "visualization" && (
+            <motion.div
+              key={activeTab}
+              className="tab-panel-v2"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              {activeTab === "costs" && (
+                <CostComparison solution={solution} inputData={inputData} />
+              )}
+              {activeTab === "employees" && (
+                <EmployeeResults solution={solution} inputData={inputData} onEmployeeHover={onEmployeeHover} />
+              )}
+              {activeTab === "details" && (
+                <ResultsPanel solution={solution} inputData={inputData} />
+              )}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
     </div>
