@@ -5,8 +5,8 @@ export const DEFAULT_PENALTY_WEIGHTS = {
   lateArrivalPenaltyPerMin: 0,
   sharingViolationPenalty: 0,
   vehiclePrefViolationPenalty: 0,
-  unassignedPenalty: 50000,
-  maxDelayViolationPenalty: 0,
+  unassignedPenalty: 100000,
+  maxDelayViolationPenalty: 50000,
 };
 
 const PENALTY_FIELDS = [

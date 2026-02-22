@@ -311,6 +311,8 @@ export default function RouteMap({ inputData, solution, hoveredEmployeeId }) {
                   key={i}
                   className={`fleet-item ${isActive ? "fleet-item-active" : ""}`}
                   onClick={() => setSelectedRoute(isActive ? null : i)}
+                  onMouseEnter={() => handleRouteHover(i)}
+                  onMouseLeave={() => handleRouteHoverEnd()}
                   style={{ cursor: "pointer" }}
                 >
                   <div

@@ -37,11 +37,11 @@ export default function CostComparison({ solution, inputData }) {
   const objWeights = data.summary?.objectiveWeightsUsed || { wCost: 0.7, wTime: 0.3 };
   const wCostPct = Math.round(objWeights.wCost * 100);
   const wTimePct = Math.round(objWeights.wTime * 100);
-  const UNASSIGNED_PENALTY = solverWeights.unassignedPenalty ?? 50000;
-  const LATE_VIOLATION_PENALTY = solverWeights.maxDelayViolationPenalty ?? 100000;
-  const SHARING_PENALTY = solverWeights.sharingViolationPenalty ?? 500;
-  const VEH_PREF_PENALTY = solverWeights.vehiclePrefViolationPenalty ?? 300;
-  const LATE_PER_MIN = solverWeights.lateArrivalPenaltyPerMin ?? 10;
+  const UNASSIGNED_PENALTY = solverWeights.unassignedPenalty ?? 100000;
+  const LATE_VIOLATION_PENALTY = solverWeights.maxDelayViolationPenalty ?? 50000;
+  const SHARING_PENALTY = solverWeights.sharingViolationPenalty ?? 0;
+  const VEH_PREF_PENALTY = solverWeights.vehiclePrefViolationPenalty ?? 0;
+  const LATE_PER_MIN = solverWeights.lateArrivalPenaltyPerMin ?? 0;
 
   // Exact per-employee violation penalty using the solver's formula:
   //   excessMinutes × (maxDelayViolationPenalty / 100) × priorityWeight
@@ -196,13 +196,13 @@ export default function CostComparison({ solution, inputData }) {
                   <strong>{Object.keys(solverWeights).length > 0 ? "Penalty weights used by this run:" : "Default penalty weights (configurable):"}</strong>
                   <ul>
                     <li>Unassigned employee: ₹{UNASSIGNED_PENALTY.toLocaleString()} (ensures everyone is served)</li>
-                    <li>Hard time window violation: ₹{LATE_VIOLATION_PENALTY.toLocaleString()} (treats it as near-hard constraint)</li>
-                    <li>Late arrival: ₹{LATE_PER_MIN} per minute past deadline</li>
-                    <li>Sharing limit exceeded: ₹{SHARING_PENALTY.toLocaleString()} per occurrence</li>
-                    <li>Vehicle preference mismatch: ₹{VEH_PREF_PENALTY.toLocaleString()} per request</li>
+                    <li>Hard time window violation: ₹{LATE_VIOLATION_PENALTY.toLocaleString()} — per excess-minute × priority weight (P1×50 … P5×10)</li>
+                    {LATE_PER_MIN > 0 && <li>Late arrival: ₹{LATE_PER_MIN} per minute past deadline</li>}
+                    {SHARING_PENALTY > 0 && <li>Sharing limit exceeded: ₹{SHARING_PENALTY.toLocaleString()} per occurrence</li>}
+                    {VEH_PREF_PENALTY > 0 && <li>Vehicle preference mismatch: ₹{VEH_PREF_PENALTY.toLocaleString()} per request</li>}
                   </ul>
                   <p className="penalty-note-footer">
-                    <strong>Example:</strong> If 6 employees are unassigned → 6 × ₹{UNASSIGNED_PENALTY.toLocaleString()} = ₹{(6 * UNASSIGNED_PENALTY).toLocaleString()} (≈{Math.round(6 * UNASSIGNED_PENALTY / 100000)} lakh). These penalties guide the optimizer but are not real charges.
+                    <strong>Example:</strong> If 6 employees unassigned → 6 × ₹{UNASSIGNED_PENALTY.toLocaleString()} = ₹{(6 * UNASSIGNED_PENALTY).toLocaleString()}. If an employee 72 min late (P1) → 72 × ₹{(LATE_VIOLATION_PENALTY/100).toLocaleString()} × 50 = ₹{(72 * LATE_VIOLATION_PENALTY / 100 * 50).toLocaleString()}. These are virtual costs that guide the optimizer, not real charges.
                   </p>
                 </div>
               </div>
