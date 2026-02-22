@@ -59,7 +59,7 @@ async function fetchRoute(coordinates) {
 }
 
 // Component to render a single route with real road data
-function RealRoutePolyline({ route, stops, color, routeIndex, isSelected, isFaded, onRouteClick }) {
+function RealRoutePolyline({ route, stops, color, routeIndex, isHighlighted, isFaded, onRouteClick, onRouteHover, onRouteHoverEnd }) {
   const [routeGeometry, setRouteGeometry] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -79,8 +79,8 @@ function RealRoutePolyline({ route, stops, color, routeIndex, isSelected, isFade
     loadRoute();
   }, [stops]);
 
-  const weight = isSelected ? 7 : isFaded ? 2 : 4;
-  const opacity = isSelected ? 0.95 : isFaded ? 0.2 : 0.55;
+  const weight = isHighlighted ? 7 : isFaded ? 2 : 4;
+  const opacity = isHighlighted ? 0.95 : isFaded ? 0.2 : 0.55;
 
   const employeeList = (stops || [])
     .filter((s) => s.type === "pickup")
@@ -106,7 +106,11 @@ function RealRoutePolyline({ route, stops, color, routeIndex, isSelected, isFade
         weight={weight}
         opacity={opacity * 0.6}
         dashArray="5, 10"
-        eventHandlers={{ click: onRouteClick }}
+        eventHandlers={{
+          click: onRouteClick,
+          mouseover: () => onRouteHover(routeIndex),
+          mouseout: () => onRouteHoverEnd(),
+        }}
       >
         <Tooltip sticky direction="top" className="route-tooltip">{tooltipContent}</Tooltip>
       </Polyline>
@@ -119,16 +123,21 @@ function RealRoutePolyline({ route, stops, color, routeIndex, isSelected, isFade
       color={color}
       weight={weight}
       opacity={opacity}
-      eventHandlers={{ click: onRouteClick }}
+      eventHandlers={{
+        click: onRouteClick,
+        mouseover: () => onRouteHover(routeIndex),
+        mouseout: () => onRouteHoverEnd(),
+      }}
     >
       <Tooltip sticky direction="top" className="route-tooltip">{tooltipContent}</Tooltip>
     </Polyline>
   );
 }
 
-export default function RouteMap({ inputData, solution }) {
+export default function RouteMap({ inputData, solution, hoveredEmployeeId }) {
   const [isDark, setIsDark] = useState(() => document.documentElement.getAttribute("data-theme") !== "light");
   const [selectedRoute, setSelectedRoute] = useState(null);
+  const [hoveredRoute, setHoveredRoute] = useState(null);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -169,6 +178,22 @@ export default function RouteMap({ inputData, solution }) {
   };
 
   const routes = solution?.data?.routes || [];
+
+  // Build employee → route index lookup for card-hover highlighting
+  const empToRouteIdx = {};
+  routes.forEach((r, idx) => {
+    (r.stops || []).filter((s) => s.type === "pickup").forEach((s) => {
+      if (s.employeeId) empToRouteIdx[s.employeeId] = idx;
+    });
+  });
+
+  // Effective highlight index: click-select > card hover > polyline hover
+  const effectiveHighlightIdx =
+    selectedRoute != null
+      ? selectedRoute
+      : hoveredEmployeeId != null
+        ? (empToRouteIdx[hoveredEmployeeId] ?? null)
+        : hoveredRoute;
 
   // Calculate summary statistics
   const totalStops = routes.reduce((sum, r) => sum + (r.stops?.length || 0), 0);
@@ -256,7 +281,7 @@ export default function RouteMap({ inputData, solution }) {
                 (r.stops || []).map((s) => s.employeeId).filter(Boolean),
               ).size;
               const routeDistance = (r.totalDist || 0).toFixed(1);
-              const isActive = selectedRoute === i;
+              const isActive = effectiveHighlightIdx === i;
               return (
                 <div
                   key={i}
@@ -268,7 +293,7 @@ export default function RouteMap({ inputData, solution }) {
                     className="fleet-color"
                     style={{
                       background: vehicleColors[i % vehicleColors.length].color,
-                      opacity: selectedRoute != null && !isActive ? 0.35 : 1,
+                      opacity: effectiveHighlightIdx != null && !isActive ? 0.35 : 1,
                     }}
                   ></div>
                   <div className="fleet-details">
@@ -288,6 +313,7 @@ export default function RouteMap({ inputData, solution }) {
                 Clear selection
               </button>
             )}
+
           </div>
         )}
       </div>
@@ -310,8 +336,8 @@ export default function RouteMap({ inputData, solution }) {
           {/* Render vehicle routes with real road routing */}
           {routes.map((route, rIdx) => {
             const color = vehicleColors[rIdx % vehicleColors.length].color;
-            const isSelected = selectedRoute === rIdx;
-            const isFaded = selectedRoute != null && !isSelected;
+            const isHighlighted = effectiveHighlightIdx === rIdx;
+            const isFaded = effectiveHighlightIdx != null && !isHighlighted;
             return (
               <React.Fragment key={rIdx}>
                 <RealRoutePolyline
@@ -319,9 +345,11 @@ export default function RouteMap({ inputData, solution }) {
                   stops={route.stops}
                   color={color}
                   routeIndex={rIdx}
-                  isSelected={isSelected}
+                  isHighlighted={isHighlighted}
                   isFaded={isFaded}
-                  onRouteClick={() => setSelectedRoute(isSelected ? null : rIdx)}
+                  onRouteClick={() => setSelectedRoute(selectedRoute === rIdx ? null : rIdx)}
+                  onRouteHover={(idx) => setHoveredRoute(idx)}
+                  onRouteHoverEnd={() => setHoveredRoute(null)}
                 />
 
                 {/* Route stop markers with sequence numbers */}

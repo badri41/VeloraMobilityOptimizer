@@ -22,6 +22,10 @@ import Header from "./components/Header.jsx";
 import FileUpload from "./components/FileUpload.jsx";
 import ResultsSection from "./components/ResultsSection.jsx";
 import PenaltyForm, { DEFAULT_PENALTY_WEIGHTS } from "./components/PenaltyForm.jsx";
+import AddEmployeeModal from "./components/AddEmployeeModal.jsx";
+import AddVehicleModal from "./components/AddVehicleModal.jsx";
+import RerunConfirmDialog from "./components/RerunConfirmDialog.jsx";
+import Toast from "./components/Toast.jsx";
 import { getSolution, submitOptimization, parseExcelFile } from "./api.js";
 
 const defaultStatus = "idle";
@@ -100,6 +104,15 @@ export default function App() {
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [penaltyWeights, setPenaltyWeights] = useState({ ...DEFAULT_PENALTY_WEIGHTS });
+
+  // Hover state for employee card → map route highlight
+  const [hoveredEmployeeId, setHoveredEmployeeId] = useState(null);
+
+  // Dynamic reoptimization modal state
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [showAddVehicle, setShowAddVehicle] = useState(false);
+  const [showRerunConfirm, setShowRerunConfirm] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const isReady = useMemo(
     () => inputData?.vehicles?.length && inputData?.requests?.length,
@@ -252,10 +265,22 @@ export default function App() {
     setSubmitError("");
   };
 
+  // ─── Dynamic Reoptimization Handlers ────────────────────────────────────
+
+  const handleAddEmployee = (req) => {
+    setInputData((prev) => ({ ...prev, requests: [...(prev?.requests || []), req] }));
+    setToast({ message: "Employee added successfully", type: "success" });
+  };
+
+  const handleAddVehicle = (veh) => {
+    setInputData((prev) => ({ ...prev, vehicles: [...(prev?.vehicles || []), veh] }));
+    setToast({ message: "Vehicle added successfully", type: "success" });
+  };
+
   // ─── Stage 4: API Call Trigger ────────────────────────────────────────────
 
   const handleOptimize = async () => {
-    if (!isReady || isSubmitting) return;
+    if (!isReady || isSubmitting) return false;
     setSubmitError("");
     setIsSubmitting(true);
 
@@ -282,8 +307,10 @@ export default function App() {
         setSolution({ status: response.status || "processing" });
       }
       setShowResults(true);
+      return true;
     } catch (error) {
       setSubmitError(error.message || "Optimization request failed.");
+      return false;
     } finally {
       setIsSubmitting(false);
     }
@@ -340,8 +367,45 @@ export default function App() {
               <span>Refine Data</span>
             </button>
           </div>
-          <ResultsSection solution={solution} inputData={inputData} />
+          <ResultsSection
+            solution={solution}
+            inputData={inputData}
+            hoveredEmployeeId={hoveredEmployeeId}
+            onEmployeeHover={setHoveredEmployeeId}
+            onAddEmployee={() => setShowAddEmployee(true)}
+            onAddVehicle={() => setShowAddVehicle(true)}
+            onRerun={() => setShowRerunConfirm(true)}
+          />
         </div>
+        <Toast toast={toast} onDismiss={() => setToast(null)} />
+        {showAddEmployee && (
+          <AddEmployeeModal
+            onSave={(req) => { handleAddEmployee(req); setShowAddEmployee(false); }}
+            onClose={() => setShowAddEmployee(false)}
+          />
+        )}
+        {showAddVehicle && (
+          <AddVehicleModal
+            onSave={(veh) => { handleAddVehicle(veh); setShowAddVehicle(false); }}
+            onClose={() => setShowAddVehicle(false)}
+          />
+        )}
+        {showRerunConfirm && (
+          <RerunConfirmDialog
+            inputData={inputData}
+            isSubmitting={isSubmitting}
+            onConfirm={async () => {
+              const success = await handleOptimize();
+              if (success) {
+                setShowRerunConfirm(false);
+                setToast({ message: "Optimization complete!", type: "success" });
+              } else {
+                setToast({ message: "Optimization failed. Please try again.", type: "error" });
+              }
+            }}
+            onClose={() => setShowRerunConfirm(false)}
+          />
+        )}
       </>
     );
   }

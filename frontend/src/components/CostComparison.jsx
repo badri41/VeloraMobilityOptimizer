@@ -42,9 +42,8 @@ export default function CostComparison({ solution, inputData }) {
 
   const penaltyBreakdown = [
     { label: "Unassigned employees", count: unassignedCount, weight: UNASSIGNED_PENALTY, subtotal: unassignedCount * UNASSIGNED_PENALTY, color: "#ef4444" },
-    { label: "Time window violations", count: violatedCount, weight: LATE_VIOLATION_PENALTY, subtotal: violatedCount * LATE_VIOLATION_PENALTY, color: "#f87171" },
-    { label: "Within-tolerance delays", count: withinTolCount, weight: LATE_PER_MIN, subtotal: withinTolCount * LATE_PER_MIN, color: "#f59e0b", note: "≈ per minute late × 10" },
-    { label: "Sharing limit violations", count: sharingViolations, weight: SHARING_PENALTY, subtotal: sharingViolations * SHARING_PENALTY, color: "#f97316" },
+    { label: "Hard time window violations", count: violatedCount, rateFormula: `excess minutes × (₹${LATE_VIOLATION_PENALTY.toLocaleString()}/100) × priority`, color: "#f87171", variable: true },
+    { label: "Sharing limit violations", count: sharingViolations, weight: SHARING_PENALTY, subtotal: sharingViolations * SHARING_PENALTY, color: "#f97316", note: "per-event basis; approximate" },
     { label: "Vehicle pref. violations", count: vehPrefViolations, weight: VEH_PREF_PENALTY, subtotal: vehPrefViolations * VEH_PREF_PENALTY, color: "#a855f7" },
   ].filter((p) => p.count > 0);
 
@@ -109,6 +108,7 @@ export default function CostComparison({ solution, inputData }) {
               <div className="item-left">
                 <ShieldCheck size={16} />
                 <span>Constraint Penalties</span>
+                <span style={{ fontSize: "0.65rem", color: "var(--text-dim)", fontStyle: "italic" }}>Contributing Factors</span>
                 <span className="penalty-info-tag">
                   <Info size={11} /> What's this?
                 </span>
@@ -129,21 +129,33 @@ export default function CostComparison({ solution, inputData }) {
                 {penaltyBreakdown.length === 0 ? (
                   <p className="penalty-all-clear">No constraint violations — all penalties are zero.</p>
                 ) : (
-                  <div className="penalty-items">
-                    {penaltyBreakdown.map((p, i) => (
-                      <div key={i} className="penalty-item">
-                        <div className="penalty-item-left">
-                          <span className="penalty-dot" style={{ background: p.color }} />
-                          <span className="penalty-item-label">{p.label}</span>
-                          <span className="penalty-item-count">×{p.count}</span>
+                  <>
+                    <div className="penalty-items">
+                      {penaltyBreakdown.map((p, i) => (
+                        <div key={i} className="penalty-item">
+                          <div className="penalty-item-left">
+                            <span className="penalty-dot" style={{ background: p.color }} />
+                            <span className="penalty-item-label">{p.label}</span>
+                            <span className="penalty-item-count">×{p.count}</span>
+                          </div>
+                          <div className="penalty-item-right">
+                            {p.variable ? (
+                              <span className="penalty-weight" style={{ fontStyle: "italic" }}>variable: {p.rateFormula}</span>
+                            ) : (
+                              <>
+                                <span className="penalty-weight">@ ₹{p.weight.toLocaleString()}{p.note ? ` (${p.note})` : ""}</span>
+                                <span className="penalty-subtotal" style={{ color: p.color }}>₹{p.subtotal.toLocaleString()}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
-                        <div className="penalty-item-right">
-                          <span className="penalty-weight">@ ₹{p.weight.toLocaleString()}{p.note ? ` ${p.note}` : ""}</span>
-                          <span className="penalty-subtotal" style={{ color: p.color }}>₹{p.subtotal.toLocaleString()}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                    <div className="penalty-reconcile">
+                      <span>Solver-computed total (exact):</span>
+                      <strong>₹{totalPenaltyCost.toLocaleString()}</strong>
+                    </div>
+                  </>
                 )}
                 <div className="penalty-weights-note">
                   <strong>{Object.keys(solverWeights).length > 0 ? "Penalty weights used by this run:" : "Default penalty weights (configurable):"}</strong>
@@ -226,6 +238,8 @@ export default function CostComparison({ solution, inputData }) {
         .penalty-weights-note ul { margin: 6px 0 6px 14px; padding: 0; }
         .penalty-weights-note li { margin-bottom: 2px; }
         .penalty-note-footer { margin-top: 8px; font-size: 0.75rem; color: var(--text-dim); }
+        .penalty-reconcile { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25); border-radius: 8px; font-size: 0.78rem; color: var(--text-dim); }
+        .penalty-reconcile strong { color: #10b981; font-family: var(--font-display); font-size: 0.9rem; }
 
         /* Objective weights */
         .obj-weights-panel { margin-top: 16px; padding: 14px 16px; background: rgba(59,130,246,0.05); border: 1px solid rgba(59,130,246,0.15); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }

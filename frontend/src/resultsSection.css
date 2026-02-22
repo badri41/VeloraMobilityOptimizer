@@ -29,6 +29,26 @@
   -webkit-text-fill-color: transparent;
 }
 
+.reopt-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+  flex-wrap: wrap;
+}
+
+.reopt-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  padding: 8px 18px;
+}
+
+.reopt-btn-run {
+  margin-left: auto;
+}
+
 .results-tabs-nav {
   display: flex;
   background: var(--bg-glass);

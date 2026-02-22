@@ -8,6 +8,9 @@ import {
   FileJson,
   FileSpreadsheet,
   FileText,
+  UserPlus,
+  Truck,
+  RefreshCw,
 } from "lucide-react";
 import { downloadJSON, downloadExcel, downloadPDF } from "../utils/downloadUtils.js";
 import RouteMap from "./RouteMap.jsx";
@@ -16,7 +19,7 @@ import EmployeeResults from "./EmployeeResults.jsx";
 import ResultsPanel from "./ResultsPanel.jsx";
 import "../resultsSection.css";
 
-export default function ResultsSection({ solution, inputData }) {
+export default function ResultsSection({ solution, inputData, hoveredEmployeeId, onEmployeeHover, onAddEmployee, onAddVehicle, onRerun }) {
   const [activeTab, setActiveTab] = useState("visualization");
 
   if (!solution || solution.status !== "completed") {
@@ -64,6 +67,26 @@ export default function ResultsSection({ solution, inputData }) {
         </div>
       </div>
 
+      {(onAddEmployee || onAddVehicle || onRerun) && (
+        <div className="reopt-bar">
+          {onAddEmployee && (
+            <button className="btn btn-secondary reopt-btn" onClick={onAddEmployee}>
+              <UserPlus size={16} /> Add Employee
+            </button>
+          )}
+          {onAddVehicle && (
+            <button className="btn btn-secondary reopt-btn" onClick={onAddVehicle}>
+              <Truck size={16} /> Add Vehicle
+            </button>
+          )}
+          {onRerun && (
+            <button className="btn btn-primary reopt-btn reopt-btn-run" onClick={onRerun}>
+              <RefreshCw size={16} /> Re-Run Optimization
+            </button>
+          )}
+        </div>
+      )}
+
       <nav className="results-tabs-nav">
         {tabs.map((tab) => (
           <button
@@ -88,13 +111,13 @@ export default function ResultsSection({ solution, inputData }) {
             transition={{ duration: 0.2 }}
           >
             {activeTab === "visualization" && (
-              <RouteMap inputData={inputData} solution={solution} />
+              <RouteMap inputData={inputData} solution={solution} hoveredEmployeeId={hoveredEmployeeId} />
             )}
             {activeTab === "costs" && (
               <CostComparison solution={solution} inputData={inputData} />
             )}
             {activeTab === "employees" && (
-              <EmployeeResults solution={solution} inputData={inputData} />
+              <EmployeeResults solution={solution} inputData={inputData} onEmployeeHover={onEmployeeHover} />
             )}
             {activeTab === "details" && (
               <ResultsPanel solution={solution} inputData={inputData} />
