@@ -13,7 +13,7 @@
 
 services:
   - type: web
-    name: velora-backend
+    name: velorabackend-kri-2651-ti
     runtime: docker
     
     # Dockerfile location (relative to repo root)
@@ -42,7 +42,7 @@ services:
       - key: PORT
         value: 3001
       - key: FRONTEND_URL
-        value: https://velora-jext.onrender.com
+        value: https://velorafrontend-kri-2651-ti.onrender.com
       # Set in Render Dashboard (Settings > Environment)
       - key: MAPS_API_KEY
         sync: false  # Google Maps API key (optional)
