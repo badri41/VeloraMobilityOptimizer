@@ -4,7 +4,7 @@ Excel to JSON converter for this...
 
 Usage: python parser/excel_to_json.py input.xlsx output.json
 
-Expected sheets (optional): vehicles, requests, employees (not required)
+Expected sheets: vehicles, employees, baseline, config 
 
 """
 
@@ -77,7 +77,7 @@ def main():
     inp = sys.argv[1]
     out = sys.argv[2]
     xls = pd.ExcelFile(inp)
-    result = {"config": {"allow_external_maps": False, "maps_api_key": ""}}
+    result: dict = {"config": {"allow_external_maps": False, "maps_api_key": ""}}
 
     if 'vehicles' in xls.sheet_names:
         df = xls.parse('vehicles')

@@ -57,13 +57,17 @@ function validateInput(data) {
 
 function prepareInput(data) {
   const incomingConfig = data.config || {};
+  const distMethod = incomingConfig.distance_method || "osrm";
   const prepared = {
     config: {
-      allow_external_maps: incomingConfig.allow_external_maps || false,
+      allow_external_maps: distMethod !== "haversine",
+      map_provider: distMethod === "haversine" ? "haversine" : "osrm",
       maps_api_key: incomingConfig.maps_api_key || "",
       ...(incomingConfig.weights ? { weights: incomingConfig.weights } : {}),
       ...(incomingConfig.tolerances ? { tolerances: incomingConfig.tolerances } : {}),
       ...(incomingConfig.penalty_weights ? { penalty_weights: incomingConfig.penalty_weights } : {}),
+      solver_time_seconds: Math.max(10, Math.min(300, incomingConfig.solver_time_seconds || 30)),
+      ...(incomingConfig.force_assign !== undefined ? { force_assign: incomingConfig.force_assign } : {}),
     },
     vehicles: data.vehicles.map((v, i) => ({
       id: v.id !== undefined ? v.id : i,
@@ -508,7 +512,8 @@ router.post("/optimize/json", async (req, res) => {
     fs.writeFileSync(inputPath, JSON.stringify(preparedInput, null, 2));
 
     // Stage 7 & 8: Run C++ solver
-    const solverOutput = await solver.run(inputPath, outputPath);
+    const solverTime = preparedInput.config?.solver_time_seconds || null;
+    const solverOutput = await solver.run(inputPath, outputPath, solverTime);
 
     // Stage 9: Post-Processing
     const result = postProcess(solverOutput, preparedInput);

@@ -1,41 +1,11 @@
-# ══════════════════════════════════════════════════════════════════════════════
-# Render Blueprint - Velora Mobility Optimizer Backend
-# https://render.com/docs/blueprint-spec
-# ══════════════════════════════════════════════════════════════════════════════
-#
-# DEPLOYMENT:
-#   1. Connect this repo to Render
-#   2. Select "Backend_deplyment" branch
-#   3. Choose "Blueprint" deployment type
-#   4. Set environment variables in dashboard
-#
-# ══════════════════════════════════════════════════════════════════════════════
-
 services:
   - type: web
     name: velorabackend-kri-2651-ti
     runtime: docker
+    plan: free  
     
-    # Dockerfile location (relative to repo root)
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    
-    # Build configuration
-    branch: Backend_deplyment
-    
-    # Plan: free (spins down after 15min idle) or starter ($7/mo always-on)
-    plan: free
-    
-    # Server configuration
-    region: oregon  # or singapore, frankfurt, ohio
-    
-    # Health monitoring
     healthCheckPath: /api/health
     
-    # Auto-deploy on push
-    autoDeploy: true
-    
-    # Environment variables
     envVars:
       - key: NODE_ENV
         value: production
@@ -43,6 +13,5 @@ services:
         value: 3001
       - key: FRONTEND_URL
         value: https://velorafrontend-kri-2651-ti.onrender.com
-      # Set in Render Dashboard (Settings > Environment)
       - key: MAPS_API_KEY
-        sync: false  # Google Maps API key (optional)
+        sync: false 

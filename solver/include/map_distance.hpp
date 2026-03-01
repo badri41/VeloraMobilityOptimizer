@@ -7,7 +7,7 @@
 
 // API Provider enum
 enum class MapProvider {
-    HAVERSINE,          // No API - uses Haversine * 1.4 approximation
+    HAVERSINE,          // No API - uses Haversine straight-line distance
     GOOGLE_MAPS,        // Google Distance Matrix API
     OPENROUTESERVICE,   // OpenRouteService (free, open-source)
     OSRM                // Open Source Routing Machine (self-hosted or public demo)
@@ -46,7 +46,7 @@ public:
 
     // Compute NxN distance table for a set of locations using OSRM Table API
     // Returns flat vector of size N*N (row-major), distances in km
-    // Falls back to Haversine * 1.4 if API fails
+    // Falls back to Haversine if API fails
     std::vector<double> computeDistanceTable(
         const std::vector<std::pair<double,double>>& locations) const;
 

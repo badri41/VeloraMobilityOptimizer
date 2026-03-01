@@ -75,7 +75,7 @@ double MapDistance::haversine(double lat1, double lon1, double lat2, double lon2
 // ============================================================================
 // OpenRouteService API with Timeout Fallback
 // Primary provider: Free API key from https://openrouteservice.org/dev/#/signup
-// Fallback: Haversine * 1.4 on timeout or error
+// Fallback: Haversine on timeout or error
 // ============================================================================
 
 double MapDistance::openRouteServiceDistance(double lat1, double lon1, double lat2, double lon2) const {
@@ -83,7 +83,7 @@ double MapDistance::openRouteServiceDistance(double lat1, double lon1, double la
     apiCallCount++;
 
     // Pre-calculate fallback in case of timeout
-    double fallbackDistance = haversine(lat1, lon1, lat2, lon2) * 1.4;
+    double fallbackDistance = haversine(lat1, lon1, lat2, lon2);
 
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -94,10 +94,12 @@ double MapDistance::openRouteServiceDistance(double lat1, double lon1, double la
     // ORS v2 requires POST with JSON body, lon/lat order (GeoJSON format)
     std::string url = "https://api.openrouteservice.org/v2/directions/driving-car";
 
-    // Build JSON request body
+    // Build JSON request body — preference=shortest routes by road distance, not travel time
     std::ostringstream bodyStream;
     bodyStream << "{\"coordinates\":[[" << std::fixed << std::setprecision(6)
-               << lon1 << "," << lat1 << "],[" << lon2 << "," << lat2 << "]]}";
+               << lon1 << "," << lat1 << "],[" << lon2 << "," << lat2 << "]],"
+               << "\"preference\":\"shortest\"}";
+
     std::string body = bodyStream.str();
 
     std::string response;
@@ -128,7 +130,7 @@ double MapDistance::openRouteServiceDistance(double lat1, double lon1, double la
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    // Handle timeout - immediate fallback to Haversine * 1.4
+    // Handle timeout - immediate fallback to Haversine
     if (res == CURLE_OPERATION_TIMEDOUT || res == CURLE_COULDNT_CONNECT) {
         timeoutFallbackCount++;
         // Silent fallback on timeout - don't spam logs
@@ -141,7 +143,7 @@ double MapDistance::openRouteServiceDistance(double lat1, double lon1, double la
         static bool errorLogged = false;
         if (!errorLogged) {
             std::cerr << "[MapDistance] OpenRouteService error: " << curl_easy_strerror(res)
-                      << ". Using Haversine * 1.4 fallback.\n";
+                      << ". Using Haversine fallback.\n";
             errorLogged = true;
         }
         return fallbackDistance;
@@ -153,7 +155,7 @@ double MapDistance::openRouteServiceDistance(double lat1, double lon1, double la
         static bool httpErrorLogged = false;
         if (!httpErrorLogged) {
             std::cerr << "[MapDistance] OpenRouteService HTTP " << httpCode
-                      << ". Using Haversine * 1.4 fallback.\n";
+                      << ". Using Haversine fallback.\n";
             httpErrorLogged = true;
         }
         return fallbackDistance;
@@ -192,8 +194,8 @@ double MapDistance::openRouteServiceDistance(double lat1, double lon1, double la
     errorFallbackCount++;
     return fallbackDistance;
 #else
-    // No CURL - always use Haversine * 1.4
-    return haversine(lat1, lon1, lat2, lon2) * 1.4;
+    // No CURL - always use Haversine
+    return haversine(lat1, lon1, lat2, lon2);
 #endif
 }
 
@@ -203,7 +205,7 @@ double MapDistance::openRouteServiceDistance(double lat1, double lon1, double la
 
 double MapDistance::googleMapsDistance(double lat1, double lon1, double lat2, double lon2) const {
 #ifdef USE_CURL
-    double fallbackDistance = haversine(lat1, lon1, lat2, lon2) * 1.4;
+    double fallbackDistance = haversine(lat1, lon1, lat2, lon2);
 
     CURL* curl = curl_easy_init();
     if (!curl) return fallbackDistance;
@@ -245,7 +247,7 @@ double MapDistance::googleMapsDistance(double lat1, double lon1, double lat2, do
 
     return fallbackDistance;
 #else
-    return haversine(lat1, lon1, lat2, lon2) * 1.4;
+    return haversine(lat1, lon1, lat2, lon2);
 #endif
 }
 
@@ -255,7 +257,7 @@ double MapDistance::googleMapsDistance(double lat1, double lon1, double lat2, do
 
 double MapDistance::osrmDistance(double lat1, double lon1, double lat2, double lon2) const {
 #ifdef USE_CURL
-    double fallbackDistance = haversine(lat1, lon1, lat2, lon2) * 1.4;
+    double fallbackDistance = haversine(lat1, lon1, lat2, lon2);
 
     CURL* curl = curl_easy_init();
     if (!curl) return fallbackDistance;
@@ -293,7 +295,7 @@ double MapDistance::osrmDistance(double lat1, double lon1, double lat2, double l
 
     return fallbackDistance;
 #else
-    return haversine(lat1, lon1, lat2, lon2) * 1.4;
+    return haversine(lat1, lon1, lat2, lon2);
 #endif
 }
 
@@ -307,8 +309,8 @@ double MapDistance::distance(double lat1, double lon1, double lat2, double lon2)
         return 0.0;
     }
 
-    // Pre-calculate Haversine * 1.4 (always available as fallback)
-    double haversineRoad = haversine(lat1, lon1, lat2, lon2) * 1.4;
+    // Pre-calculate Haversine (always available as fallback)
+    double haversineRoad = haversine(lat1, lon1, lat2, lon2);
 
     // Check cache first (regardless of provider)
     if (cacheEnabled_) {
@@ -322,23 +324,17 @@ double MapDistance::distance(double lat1, double lon1, double lat2, double lon2)
         }
     }
 
+    // Fast path: haversine mode or external calls disabled — skip all API calls entirely
+    if (provider_ == MapProvider::HAVERSINE || !allowExternal_) {
+        return haversineRoad;
+    }
+
     // If API has been disabled due to repeated failures, use Haversine
     if (globalDisableExternal.load()) {
         return haversineRoad;
     }
 
-    // If external maps are disabled OR provider is explicitly Haversine, skip all API calls
-    if (!allowExternal_ || provider_ == MapProvider::HAVERSINE) {
-        // Cache and return haversine result
-        if (cacheEnabled_) {
-            std::string cacheKey = makeCacheKey(lat1, lon1, lat2, lon2);
-            std::lock_guard<std::mutex> lock(cacheMutex_);
-            distanceCache_[cacheKey] = haversineRoad;
-        }
-        return haversineRoad;
-    }
-
-    // Try to get real road distance via API
+    // ALWAYS try to get real road distance via API
     // Priority: 1) Configured provider with API key, 2) OSRM (free, no key)
     double result = haversineRoad;
     bool apiAttempted = false;
@@ -395,7 +391,7 @@ cache_and_return:
         // Less than 25% success rate after 20+ calls - disable API
         globalDisableExternal.store(true);
         std::cerr << "[MapDistance] Low success rate (" << successCalls << "/" << totalCalls
-                  << "). Switching to Haversine * 1.4 for remaining calculations.\n";
+                  << "). Switching to Haversine for remaining calculations.\n";
     }
 
     return result;
@@ -419,7 +415,6 @@ int MapDistance::getApiCallCount() { return apiCallCount.load(); }
 int MapDistance::getApiSuccessCount() { return apiSuccessCount.load(); }
 int MapDistance::getTimeoutFallbackCount() { return timeoutFallbackCount.load(); }
 int MapDistance::getErrorFallbackCount() { return errorFallbackCount.load(); }
-
 // ============================================================================
 // Distance Table (OSRM Table API) — single HTTP call for NxN matrix
 // ============================================================================
@@ -432,14 +427,14 @@ std::vector<double> MapDistance::computeDistanceTable(
 
     if (N == 0) return matrix;
 
-    // Build Haversine * 1.4 fallback matrix first
+    // Build Haversine fallback matrix first
     auto buildHaversineFallback = [&]() {
         for (size_t i = 0; i < N; ++i) {
             for (size_t j = 0; j < N; ++j) {
                 if (i == j) { matrix[i * N + j] = 0.0; continue; }
                 matrix[i * N + j] = haversine(
                     locations[i].first, locations[i].second,
-                    locations[j].first, locations[j].second) * 1.4;
+                    locations[j].first, locations[j].second);
             }
         }
     };
@@ -450,7 +445,10 @@ std::vector<double> MapDistance::computeDistanceTable(
         return matrix;
     }
 
-    // Build OSRM Table API URL: /table/v1/driving/lon1,lat1;lon2,lat2;...?annotations=distance
+    // ── OSRM Table API ───────────────────────────────────────────────────────
+    // Free, no API key, reliable public instance. Returns real road distances
+    // via annotations=distance (meters). Routes via fastest path — same as any
+    // other free road-distance API. Single HTTP call for the full NxN matrix.
     std::ostringstream urlStream;
     urlStream << "https://router.project-osrm.org/table/v1/driving/";
     for (size_t i = 0; i < N; ++i) {
@@ -474,9 +472,7 @@ std::vector<double> MapDistance::computeDistanceTable(
     curl_easy_setopt(curl, CURLOPT_URL, urlStream.str().c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    // Generous timeout for table API (up to 30s for large matrices)
-    long tableTimeout = std::max(timeoutMs_ * 5, 30000L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, tableTimeout);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 20000L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "VeloraMobilityOptimizer/1.0");
@@ -487,14 +483,13 @@ std::vector<double> MapDistance::computeDistanceTable(
 
     if (res == CURLE_OPERATION_TIMEDOUT || res == CURLE_COULDNT_CONNECT) {
         timeoutFallbackCount++;
-        std::cerr << "[MapDistance] Table API timed out, using Haversine fallback\n";
+        std::cerr << "[MapDistance] OSRM Table API timed out, using Haversine fallback\n";
         buildHaversineFallback();
         return matrix;
     }
-
     if (res != CURLE_OK) {
         errorFallbackCount++;
-        std::cerr << "[MapDistance] Table API error: " << curl_easy_strerror(res)
+        std::cerr << "[MapDistance] OSRM Table API error: " << curl_easy_strerror(res)
                   << ", using Haversine fallback\n";
         buildHaversineFallback();
         return matrix;
@@ -503,41 +498,37 @@ std::vector<double> MapDistance::computeDistanceTable(
     try {
         json doc = json::parse(response);
         if (doc["code"] != "Ok" || !doc.contains("distances")) {
-            std::cerr << "[MapDistance] Table API returned code: "
+            errorFallbackCount++;
+            std::cerr << "[MapDistance] OSRM Table API returned code: "
                       << doc.value("code", "unknown") << ", using Haversine fallback\n";
             buildHaversineFallback();
             return matrix;
         }
-
         auto& distances = doc["distances"];
         if (distances.size() != N) {
-            std::cerr << "[MapDistance] Table API returned wrong dimensions, using Haversine fallback\n";
+            errorFallbackCount++;
+            std::cerr << "[MapDistance] OSRM Table API returned wrong dimensions, using Haversine fallback\n";
             buildHaversineFallback();
             return matrix;
         }
-
         for (size_t i = 0; i < N; ++i) {
             for (size_t j = 0; j < N; ++j) {
                 if (distances[i][j].is_null()) {
-                    // No route found — use Haversine fallback for this pair
                     matrix[i * N + j] = haversine(
                         locations[i].first, locations[i].second,
-                        locations[j].first, locations[j].second) * 1.4;
+                        locations[j].first, locations[j].second);
                 } else {
-                    // OSRM returns meters, convert to km
                     matrix[i * N + j] = distances[i][j].get<double>() / 1000.0;
                 }
             }
         }
-
         apiSuccessCount++;
-        std::cerr << "[MapDistance] Table API success: " << N << "x" << N
+        std::cerr << "[MapDistance] OSRM Table API success: " << N << "x" << N
                   << " matrix computed in 1 API call\n";
         return matrix;
-
     } catch (const std::exception& e) {
         errorFallbackCount++;
-        std::cerr << "[MapDistance] Table API parse error: " << e.what()
+        std::cerr << "[MapDistance] OSRM Table API parse error: " << e.what()
                   << ", using Haversine fallback\n";
         buildHaversineFallback();
         return matrix;

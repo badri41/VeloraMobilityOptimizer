@@ -4,7 +4,17 @@ require("dotenv").config({ path: path.join(__dirname, "../.env") });
 const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
+const os = require("os");
 const optimizationRoutes = require("./routes/optimization");
+
+function getLanIp() {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces) {
+      if (iface.family === "IPv4" && !iface.internal) return iface.address;
+    }
+  }
+  return "localhost";
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -12,6 +22,7 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || "*",
+  credentials: true,
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
@@ -63,10 +74,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error", details: err.message });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`\n  Velora Backend API running on http://localhost:${PORT}`);
-  console.log(`  Health: http://localhost:${PORT}/api/health\n`);
+// Start server — bind to all interfaces so the Vite proxy can reach it
+app.listen(PORT, "0.0.0.0", () => {
+  const lanIp = getLanIp();
+  console.log(`\n  Velora Backend API`);
+  console.log(`  Local:   http://localhost:${PORT}`);
+  console.log(`  Network: http://${lanIp}:${PORT}  (backend — access via Vite proxy)`);
+  console.log(`\n  Open on phone: http://${lanIp}:5173\n`);
 
   // Startup checks
   const solverName =
