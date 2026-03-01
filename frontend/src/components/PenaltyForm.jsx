@@ -1,62 +1,60 @@
 import React, { useState } from "react";
 import { ChevronDown, ChevronUp, Settings2, RotateCcw } from "lucide-react";
 
+// Recommended defaults based on typical enterprise fleet costs (INR).
+// Late arrival: ₹15/min is realistic — a 10-min delay costs ₹150, comparable to a short detour.
+// Sharing violation: ₹500 is meaningful but not so high it blocks good routes.
+// Vehicle preference: ₹300 — soft preference, allows overrides when needed.
+// Max delay violation: ₹50,000 — strong but allows forced-assign as a last resort.
 export const DEFAULT_PENALTY_WEIGHTS = {
-  lateArrivalPenaltyPerMin: 0,
-  sharingViolationPenalty: 0,
-  vehiclePrefViolationPenalty: 0,
-  unassignedPenalty: 100000,
+  lateArrivalPenaltyPerMin: 15,
+  sharingViolationPenalty: 500,
+  vehiclePrefViolationPenalty: 300,
   maxDelayViolationPenalty: 50000,
 };
 
 const PENALTY_FIELDS = [
   {
     key: "lateArrivalPenaltyPerMin",
-    label: "Late Arrival (per minute)",
-    description: "Cost per minute an employee's pickup/dropoff exceeds their time window",
+    label: "Late Arrival Penalty (per minute)",
+    description: "Added cost per minute an employee is picked up or dropped off after their time window. ₹15/min = a 10-minute delay costs ₹150 — similar to a short detour.",
     min: 0,
-    step: 1,
+    step: 5,
   },
   {
     key: "sharingViolationPenalty",
-    label: "Sharing Limit Violation",
-    description: "Penalty when more co-passengers share a vehicle than the employee requested",
+    label: "Sharing Limit Violation (per occurrence)",
+    description: "Penalty when the number of co-passengers exceeds what the employee requested. Raise this if sharing preferences are critical; lower it to allow more aggressive ride-pooling.",
     min: 0,
     step: 100,
   },
   {
     key: "vehiclePrefViolationPenalty",
-    label: "Vehicle Preference Violation",
-    description: "Penalty when an employee is assigned a vehicle type different from their preference",
+    label: "Vehicle Preference Violation (per employee)",
+    description: "Penalty when an employee is assigned a vehicle category different from their preference (e.g., premium vs. normal). Keep this moderate — it is a soft preference, not a hard rule.",
     min: 0,
-    step: 100,
-  },
-  {
-    key: "unassignedPenalty",
-    label: "Unassigned Employee",
-    description: "Heavy penalty to ensure every employee is served; raise to prioritise assignment over other metrics",
-    min: 0,
-    step: 5000,
+    step: 50,
   },
   {
     key: "maxDelayViolationPenalty",
-    label: "Hard Time Window Violation",
-    description: "Extreme penalty when an employee is served beyond their late-time plus tolerance window",
+    label: "Hard Time Window Breach (per employee)",
+    description: "Applied when an employee is served past their late-time plus the priority tolerance window. This is the solver's last guardrail — keep it significantly higher than lateArrivalPenaltyPerMin.",
     min: 0,
     step: 10000,
   },
 ];
 
-export default function PenaltyForm({ weights, onChange }) {
+export default function PenaltyForm({ weights, onChange, forceAssign, onForceAssignChange }) {
   const [expanded, setExpanded] = useState(false);
 
   const isModified = Object.keys(DEFAULT_PENALTY_WEIGHTS).some(
     (k) => weights[k] !== DEFAULT_PENALTY_WEIGHTS[k]
-  );
+  ) || forceAssign !== true;
 
   const handleReset = (e) => {
     e.stopPropagation();
     onChange({ ...DEFAULT_PENALTY_WEIGHTS });
+    onForceAssignChange(true);
   };
 
   return (
@@ -89,6 +87,24 @@ export default function PenaltyForm({ weights, onChange }) {
             Higher values make the solver avoid that violation more aggressively.
             These do <strong>not</strong> affect real monetary costs.
           </p>
+
+          <div className="pf-force-assign-row">
+            <label className="pf-force-assign-label">
+              <input
+                type="checkbox"
+                checked={forceAssign}
+                onChange={(e) => onForceAssignChange(e.target.checked)}
+                className="pf-force-assign-check"
+              />
+              <span className="pf-label">Force Assign Unserved Employees</span>
+            </label>
+            <span className="pf-desc">
+              When enabled, the optimizer will assign every employee to a vehicle even if their
+              time window cannot be fully met. Disable this to let the optimizer leave
+              difficult-to-serve employees unassigned — they will be clearly flagged in results.
+            </span>
+          </div>
+
           <div className="pf-fields">
             {PENALTY_FIELDS.map(({ key, label, description, min, step }) => (
               <div key={key} className="pf-field">
@@ -141,6 +157,9 @@ export default function PenaltyForm({ weights, onChange }) {
           display: flex; flex-direction: column; gap: 16px;
         }
         .pf-description { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; }
+        .pf-force-assign-row { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.15); border-radius: 8px; }
+        .pf-force-assign-label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .pf-force-assign-check { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; flex-shrink: 0; }
         .pf-fields { display: flex; flex-direction: column; gap: 12px; }
         .pf-field { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
         .pf-field-info { flex: 1; min-width: 180px; }

@@ -21,7 +21,7 @@ export default function AddEmployeeModal({ onSave, onClose }) {
     lateTime: "09:30",
     load: "1",
     vehiclePreference: "any",
-    sharingLimit: "100",
+    sharingLimit: "3",
   });
   const [error, setError] = useState("");
 
@@ -111,12 +111,14 @@ export default function AddEmployeeModal({ onSave, onClose }) {
 
           <div className="form-row-2col">
             <div className="form-row">
-              <label>Load (seats)</label>
+              <label>Seats Required</label>
               <input className="form-input" type="number" min="1" max="10" value={form.load} onChange={(e) => set("load", e.target.value)} />
+              <span className="form-hint">How many seats this employee occupies — almost always 1. Use &gt;1 only for groups travelling together as one booking.</span>
             </div>
             <div className="form-row">
-              <label>Sharing Limit</label>
+              <label>Max Co-passengers (Sharing)</label>
               <input className="form-input" type="number" min="1" value={form.sharingLimit} onChange={(e) => set("sharingLimit", e.target.value)} />
+              <span className="form-hint">Max number of co-workers allowed in the same vehicle. 1 = solo only.</span>
             </div>
           </div>
 
@@ -175,6 +177,7 @@ function ModalStyles() {
       }
       .form-input:focus { border-color: var(--primary); }
       .req { color: #ef4444; margin-left: 2px; }
+      .form-hint { font-size: 0.68rem; color: var(--text-dim); line-height: 1.4; margin-top: 2px; }
       .modal-error { color: #f87171; font-size: 0.8rem; padding: 8px 12px; background: rgba(239,68,68,0.08); border-radius: 8px; border: 1px solid rgba(239,68,68,0.2); }
     `}</style>
   );

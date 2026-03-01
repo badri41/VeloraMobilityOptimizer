@@ -22,6 +22,8 @@ import Header from "./components/Header.jsx";
 import FileUpload from "./components/FileUpload.jsx";
 import ResultsSection from "./components/ResultsSection.jsx";
 import PenaltyForm, { DEFAULT_PENALTY_WEIGHTS } from "./components/PenaltyForm.jsx";
+import SolverTimeForm, { DEFAULT_SOLVER_TIME } from "./components/SolverTimeForm.jsx";
+import DistanceModeForm, { DEFAULT_DISTANCE_METHOD } from "./components/DistanceModeForm.jsx";
 import AddEmployeeModal from "./components/AddEmployeeModal.jsx";
 import AddVehicleModal from "./components/AddVehicleModal.jsx";
 import RerunConfirmDialog from "./components/RerunConfirmDialog.jsx";
@@ -104,6 +106,9 @@ export default function App() {
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [penaltyWeights, setPenaltyWeights] = useState({ ...DEFAULT_PENALTY_WEIGHTS });
+  const [solverTime, setSolverTime] = useState(DEFAULT_SOLVER_TIME);
+  const [forceAssign, setForceAssign] = useState(true);
+  const [distanceMethod, setDistanceMethod] = useState(DEFAULT_DISTANCE_METHOD);
 
   // Hover state for employee card → map route highlight
   const [hoveredEmployeeId, setHoveredEmployeeId] = useState(null);
@@ -289,6 +294,9 @@ export default function App() {
         config: {
           ...(inputData.config || {}),
           penalty_weights: penaltyWeights,
+          solver_time_seconds: solverTime,
+          force_assign: forceAssign,
+          distance_method: distanceMethod,
         },
         vehicles: inputData.vehicles,
         requests: inputData.requests,
@@ -301,6 +309,9 @@ export default function App() {
       if (response.status === "success" && response.result) {
         setSolution(buildSolution(response.result));
         setStatus("completed");
+        if (response.result.summary?.distanceMethodUsed === "haversine_fallback") {
+          setToast({ message: "OSRM API timed out — distances computed using Straight-line (Haversine) instead.", type: "warning" });
+        }
       } else {
         setSolutionId(response.solutionId || response.jobId);
         setStatus(response.status || "processing");
@@ -438,7 +449,14 @@ export default function App() {
             <FileUpload onFile={handleFile} fileName={fileName} isParsing={isParsing} onClear={handleClear} error={parseError} />
           </div>
 
-          <PenaltyForm weights={penaltyWeights} onChange={setPenaltyWeights} />
+          <PenaltyForm
+            weights={penaltyWeights}
+            onChange={setPenaltyWeights}
+            forceAssign={forceAssign}
+            onForceAssignChange={setForceAssign}
+          />
+          <SolverTimeForm value={solverTime} onChange={setSolverTime} />
+          <DistanceModeForm value={distanceMethod} onChange={setDistanceMethod} />
 
           <AnimatePresence>
             {fileName && (

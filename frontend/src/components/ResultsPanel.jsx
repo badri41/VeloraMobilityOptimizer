@@ -90,6 +90,25 @@ export default function ResultsPanel({ solution, inputData }) {
             )}
           </div>
 
+          {unassignedCount > 0 && (() => {
+            const unassignedEmployees = constraints.filter((c) => c.overallStatus === "unassigned");
+            return (
+              <div className="unassigned-report-block">
+                <div className="unassigned-report-header">
+                  <XCircle size={16} />
+                  <span>{unassignedCount} employee{unassignedCount > 1 ? "s" : ""} could not be scheduled within constraints</span>
+                </div>
+                <div className="unassigned-report-chips">
+                  {unassignedEmployees.map((c) => (
+                    <span key={c.reqId} className="unassigned-report-chip">
+                      {c.employeeId}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {violatedCount === 0 && toleranceCount === 0 && vehPrefViolations === 0 && sharingViolations === 0 && unassignedCount === 0 && (
             <div className="all-clear-banner">
               <CheckCircle size={16} />
@@ -157,17 +176,15 @@ export default function ResultsPanel({ solution, inputData }) {
         );
       })()}
 
-      {/* Distance method fallback notice */}
-      {data.summary.distanceMethod && data.summary.distanceMethod.fallbackUsed && (
+      {/* Distance method fallback notice — only when OSRM was requested but timed out */}
+      {data.summary.distanceMethodUsed === "haversine_fallback" && (
         <div className="glass-card fallback-notice">
           <AlertTriangle size={18} color="#f59e0b" />
           <div className="fallback-text">
-            <strong>Distance Approximation Used</strong>
+            <strong>OSRM Unavailable — Straight-line Distances Used</strong>
             <span>
-              {data.summary.distanceMethod.errorFallbacks > 0
-                ? `API errors occurred (${data.summary.distanceMethod.errorFallbacks} calls failed). `
-                : `API timeouts occurred (${data.summary.distanceMethod.timeoutFallbacks} calls timed out). `}
-              Distances were computed using 1.4 × Haversine as a fallback. Actual road distances may differ.
+              The OSRM road-distance API did not respond in time. Distances were computed using
+              straight-line (Haversine) instead. Cost estimates are approximate.
             </span>
           </div>
         </div>
@@ -177,6 +194,15 @@ export default function ResultsPanel({ solution, inputData }) {
         <div className="container-header">
           <Truck size={20} color="var(--primary)" />
           <h3>Vehicle Dispatch Manifest</h3>
+          {data.summary.distanceMethodUsed && (
+            <span className={`dist-method-badge ${data.summary.distanceMethodUsed === "osrm" ? "badge-osrm" : "badge-haversine"}`}>
+              {data.summary.distanceMethodUsed === "osrm"
+                ? "📡 Real-road (OSRM)"
+                : data.summary.distanceMethodUsed === "haversine_fallback"
+                  ? "📏 Straight-line (OSRM fallback)"
+                  : "📏 Straight-line (Haversine)"}
+            </span>
+          )}
         </div>
         <RoutesTable routes={data.routes} inputData={inputData} />
       </div>
@@ -220,6 +246,10 @@ export default function ResultsPanel({ solution, inputData }) {
         .health-value { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; line-height: 1; }
         .health-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; margin-top: 2px; }
         .all-clear-banner { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 10px 16px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; color: #10b981; font-size: 0.8rem; font-weight: 600; }
+        .unassigned-report-block { margin-top: 16px; padding: 14px 16px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; }
+        .unassigned-report-header { display: flex; align-items: center; gap: 8px; color: #ef4444; font-size: 0.8rem; font-weight: 700; margin-bottom: 10px; }
+        .unassigned-report-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .unassigned-report-chip { padding: 3px 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 100px; font-size: 0.72rem; font-weight: 700; color: #f87171; letter-spacing: 0.02em; }
 
         /* Summary */
         .summary-grid-v2 { padding: 24px; border-radius: var(--radius-lg); }
@@ -231,8 +261,11 @@ export default function ResultsPanel({ solution, inputData }) {
         .stat-value { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: var(--text-bright); }
 
         .routes-table-container-v2 { margin-top: 12px; }
-        .container-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-left: 8px; }
+        .container-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-left: 8px; flex-wrap: wrap; }
         .container-header h3 { font-size: 1.1rem; }
+        .dist-method-badge { padding: 3px 10px; border-radius: 100px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; }
+        .badge-osrm { background: rgba(59, 130, 246, 0.12); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.25); }
+        .badge-haversine { background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.2); }
 
         .warning-card { border-color: rgba(251, 191, 36, 0.2); background: rgba(251, 191, 36, 0.05); }
         .warning-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
